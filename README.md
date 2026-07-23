@@ -13,3 +13,4 @@ npm run dev:http   # http://localhost:5173
 
 团队：北辰（trait 数值/trade-off）· 三金（环境序列/场景/配乐）·
 Billy（视觉/UI/继承链/架构）
+# heritage-or-evolution-lab-advx2026
