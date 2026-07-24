@@ -3,15 +3,33 @@ import { Pane } from 'tweakpane';
 import { GRAVITY, TANK, TANK_PRESETS, notifyTankChange } from './world.js';
 import { screenAngle } from './input.js';
 import { BOID_PARAMS } from './boids.js';
+import {
+  CAPTURE_FX_PARAMS,
+  ENERGY_PARAMS,
+  TANK_VISUAL_PARAMS,
+  PANIC_PARAMS,
+  PREDATOR_PARAMS,
+  SIM_PARAMS,
+  TRAITS,
+  TRAIT_MAPPING,
+} from './evolution-model.js';
+import { stageTuningPreset } from './preset-validation.js';
 import m1StandingWave from '../presets/m1-standing-wave.json';
 
 // The window into the machine: Tweakpane panel, always-on FPS counter,
 // and visualizers. Every invisible force in this game eventually gets a
 // drawable form here.
-export function createDebug({ world, scene, input, presentation, flock }) {
+export function createDebug({
+  world,
+  scene,
+  input,
+  presentation,
+  flock,
+  predator,
+}) {
   // Mounted inside #app (via panel-holder) so it rotates with the game.
   const pane = new Pane({
-    title: 'the boid 水族馆',
+    title: '遗产 · 行为实验室',
     container: document.getElementById('panel-holder'),
   });
 
@@ -27,7 +45,12 @@ export function createDebug({ world, scene, input, presentation, flock }) {
   // opts.hardMin/hardMax clamp how far ⊖ can widen (e.g. beta < 0 is
   // meaningless). Hover the label for current range + default.
   function addParam(folder, obj, key, opts = {}) {
-    const { hardMin = -Infinity, hardMax = Infinity, ...tpOpts } = opts;
+    const {
+      hardMin = -Infinity,
+      hardMax = Infinity,
+      onChange = null,
+      ...tpOpts
+    } = opts;
     const def = obj[key];
     const isNumeric =
       typeof def === 'number' && tpOpts.min !== undefined && !tpOpts.options;
@@ -61,6 +84,10 @@ export function createDebug({ world, scene, input, presentation, flock }) {
     }
 
     // Tweakpane can't mutate a binding's min/max — rebuild it in place.
+    function attachListeners() {
+      if (onChange) binding.on('change', onChange);
+    }
+
     function rebuild() {
       const index = folder.children.indexOf(binding);
       binding.dispose();
@@ -71,6 +98,7 @@ export function createDebug({ world, scene, input, presentation, flock }) {
         step: state.step,
         index,
       });
+      attachListeners();
       decorate();
     }
 
@@ -97,6 +125,10 @@ export function createDebug({ world, scene, input, presentation, flock }) {
       } else {
         binding.refresh();
       }
+      // Direct assignment does not emit a Tweakpane change event. Keep
+      // structural controls (fish/predator count, tank dimensions, camera
+      // presets) in sync when their inline reset button is used.
+      if (onChange) onChange({ value: obj[key], last: true });
     }
 
     // After a preset writes obj[key] directly: repaint the control, and
@@ -115,6 +147,7 @@ export function createDebug({ world, scene, input, presentation, flock }) {
     }
 
     binding = folder.addBinding(obj, key, tpOpts);
+    attachListeners();
     decorate();
     resets.push(resetParam);
     registry.push({ ensureVisible });
@@ -127,15 +160,61 @@ export function createDebug({ world, scene, input, presentation, flock }) {
     new THREE.Vector3(0, -1, 0),
     new THREE.Vector3(0, 0, 0),
     0.35,
-    '#ffb347',
+    '#8aa9c2',
     0.06,
     0.03
   );
   scene.add(arrow);
 
   const monitors = { gravity: '', screen: '' };
+  const runtime = {
+    alive: '—',
+    panic: '—',
+    energy: '—',
+    predators: '—',
+  };
+  const derived = {
+    form: '—',
+    speed: '—',
+    radii: '—',
+    weights: '—',
+    capacity: '—',
+  };
+  const liveBindings = [];
 
-  const inputFolder = pane.addFolder({ title: 'input 感应' });
+  const runtimeFolder = pane.addFolder({ title: 'live 实时', expanded: true });
+  liveBindings.push(
+    runtimeFolder.addBinding(runtime, 'alive', {
+      readonly: true,
+      label: 'alive',
+    }),
+    runtimeFolder.addBinding(runtime, 'panic', {
+      readonly: true,
+      label: 'panic',
+    }),
+    runtimeFolder.addBinding(runtime, 'energy', {
+      readonly: true,
+      label: 'energy',
+    }),
+    runtimeFolder.addBinding(runtime, 'predators', {
+      readonly: true,
+      label: 'predators / eaten',
+    })
+  );
+  addParam(runtimeFolder, SIM_PARAMS, 'timeScale', {
+    label: 'sim speed ×',
+    min: 0,
+    max: 4,
+    step: 0.25,
+    hardMin: 0,
+    hardMax: 8,
+  });
+  runtimeFolder.addButton({ title: 'reset simulation ↺' }).on('click', () => {
+    flock.reset();
+    predator.reset();
+  });
+
+  const inputFolder = pane.addFolder({ title: 'input 感应', expanded: false });
   addParam(inputFolder, input, 'flipSign', { label: 'flip sign' });
   addParam(inputFolder, input, 'frameOffset', {
     label: 'frame',
@@ -176,6 +255,443 @@ export function createDebug({ world, scene, input, presentation, flock }) {
     label: 'screen',
   });
 
+  // --- Evolution layer: inherited traits bend (but never replace) the
+  // ordinary Reynolds rules below. The readonly rows are the translation
+  // table's live output, so a designer can see weights and radii move
+  // together rather than guessing from the fish alone.
+  const traitsFolder = pane.addFolder({
+    title: 'traits 遗传参数',
+    expanded: true,
+  });
+  addParam(traitsFolder, TRAITS, 'speed', {
+    min: 0,
+    max: 100,
+    step: 1,
+    hardMin: 0,
+    hardMax: 100,
+  });
+  addParam(traitsFolder, TRAITS, 'size', {
+    min: 0,
+    max: 100,
+    step: 1,
+    hardMin: 0,
+    hardMax: 100,
+  });
+  addParam(traitsFolder, TRAITS, 'stamina', {
+    min: 0,
+    max: 100,
+    step: 1,
+    hardMin: 0,
+    hardMax: 100,
+  });
+  liveBindings.push(
+    traitsFolder.addBinding(derived, 'form', {
+      readonly: true,
+      label: 'body / turn',
+    }),
+    traitsFolder.addBinding(derived, 'speed', {
+      readonly: true,
+      label: 'cruise / max',
+    }),
+    traitsFolder.addBinding(derived, 'radii', {
+      readonly: true,
+      label: 'radii S/A/C',
+    }),
+    traitsFolder.addBinding(derived, 'weights', {
+      readonly: true,
+      label: 'weights S/A/C',
+    }),
+    traitsFolder.addBinding(derived, 'capacity', {
+      readonly: true,
+      label: 'energy cap',
+    })
+  );
+
+  const mappingFolder = traitsFolder.addFolder({
+    title: 'translation 映射系数',
+    expanded: false,
+  });
+  addParam(mappingFolder, TRAIT_MAPPING, 'speedOctaves', {
+    min: 0,
+    max: 2,
+    step: 0.05,
+    hardMin: 0,
+    hardMax: 4,
+  });
+  addParam(mappingFolder, TRAIT_MAPPING, 'bodyScaleOctaves', {
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    hardMin: 0,
+    hardMax: 3,
+  });
+  addParam(mappingFolder, TRAIT_MAPPING, 'sizeSpeedPenaltyOctaves', {
+    label: 'size → speed −',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    hardMin: 0,
+    hardMax: 3,
+  });
+  addParam(mappingFolder, TRAIT_MAPPING, 'sizeForcePenaltyOctaves', {
+    label: 'size → force −',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    hardMin: 0,
+    hardMax: 3,
+  });
+  addParam(mappingFolder, TRAIT_MAPPING, 'sizeTurnPenaltyOctaves', {
+    label: 'size → turn −',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    hardMin: 0,
+    hardMax: 3,
+  });
+  for (const [key, label] of [
+    ['separationRadiusOctaves', 'size → sep radius'],
+    ['separationWeightOctaves', 'size → sep weight'],
+    ['alignmentRadiusOctaves', 'size → align radius'],
+    ['alignmentWeightOctaves', 'size → align weight'],
+    ['cohesionRadiusOctaves', 'size → coh radius'],
+    ['cohesionWeightOctaves', 'size → coh weight'],
+  ]) {
+    addParam(mappingFolder, TRAIT_MAPPING, key, {
+      label,
+      min: -1.5,
+      max: 1.5,
+      step: 0.05,
+      hardMin: -4,
+      hardMax: 4,
+    });
+  }
+  addParam(mappingFolder, TRAIT_MAPPING, 'staminaCapacityOctaves', {
+    label: 'stamina → capacity',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    hardMin: 0,
+    hardMax: 4,
+  });
+
+  const energyFolder = pane.addFolder({
+    title: 'energy 当前耐力',
+    expanded: false,
+  });
+  addParam(energyFolder, ENERGY_PARAMS, 'capacityBase', {
+    min: 0.1,
+    max: 4,
+    step: 0.05,
+    hardMin: 0.01,
+    hardMax: 20,
+  });
+  addParam(energyFolder, ENERGY_PARAMS, 'drainPerSecond', {
+    min: 0.001,
+    max: 0.1,
+    step: 0.001,
+    hardMin: 0,
+    hardMax: 1,
+  });
+  addParam(energyFolder, ENERGY_PARAMS, 'basalShare', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 1,
+  });
+  addParam(energyFolder, ENERGY_PARAMS, 'speedExponent', {
+    min: 0.5,
+    max: 6,
+    step: 0.1,
+    hardMin: 0,
+    hardMax: 12,
+  });
+  addParam(energyFolder, ENERGY_PARAMS, 'sizeExponent', {
+    min: 0.5,
+    max: 5,
+    step: 0.1,
+    hardMin: 0,
+    hardMax: 10,
+  });
+  addParam(energyFolder, ENERGY_PARAMS, 'tiredStart', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 1,
+  });
+  addParam(energyFolder, ENERGY_PARAMS, 'exhaustedAt', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 1,
+  });
+  for (const [key, label] of [
+    ['minSpeedFactor', 'min speed'],
+    ['minAlignmentFactor', 'min alignment'],
+    ['minCohesionFactor', 'min cohesion'],
+  ]) {
+    addParam(energyFolder, ENERGY_PARAMS, key, {
+      label,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      hardMin: 0,
+      hardMax: 1,
+    });
+  }
+  energyFolder
+    .addButton({ title: 'recharge school ↯' })
+    .on('click', () => flock.recharge());
+  energyFolder
+    .addButton({ title: 'tire one fish ↓' })
+    .on('click', () => flock.tireOne());
+
+  const panicFolder = pane.addFolder({
+    title: 'panic 惊慌传播',
+    expanded: false,
+  });
+  addParam(panicFolder, PANIC_PARAMS, 'alertRadius', {
+    min: 0.05,
+    max: 1,
+    step: 0.01,
+    hardMin: 0.01,
+    hardMax: 3,
+  });
+  addParam(panicFolder, PANIC_PARAMS, 'panicRadius', {
+    min: 0.01,
+    max: 0.5,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 2,
+  });
+  for (const [key, label] of [
+    ['directOn', 'direct on'],
+    ['directOff', 'direct off'],
+    ['signalThreshold', 'signal threshold'],
+  ]) {
+    addParam(panicFolder, PANIC_PARAMS, key, {
+      label,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      hardMin: 0,
+      hardMax: 1,
+    });
+  }
+  addParam(panicFolder, PANIC_PARAMS, 'signalRadius', {
+    min: 0.02,
+    max: 1,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 3,
+  });
+  for (const [key, label] of [
+    ['signalDecayTime', 'signal decay s'],
+    ['senseTime', 'sense time s'],
+    ['holdTime', 'hold time s'],
+    ['refractoryTime', 'refractory s'],
+    ['riseTime', 'rise time s'],
+    ['fallTime', 'fall time s'],
+  ]) {
+    addParam(panicFolder, PANIC_PARAMS, key, {
+      label,
+      min: 0.01,
+      max: 3,
+      step: 0.01,
+      hardMin: 0,
+      hardMax: 10,
+    });
+  }
+  for (const [key, label, max] of [
+    ['alignmentSourceBoost', 'source align ×', 20],
+    ['alignmentReceiverBoost', 'receiver align +', 8],
+    ['alignmentReceiverMax', 'receiver max ×', 8],
+    ['emergencyAlignmentWeight', 'emergency align', 12],
+    ['panicTurnBoost', 'panic turn +', 4],
+    ['escapeWeight', 'escape weight', 8],
+  ]) {
+    addParam(panicFolder, PANIC_PARAMS, key, {
+      label,
+      min: 0,
+      max,
+      step: 0.1,
+      hardMin: 0,
+      hardMax: 40,
+    });
+  }
+  addParam(panicFolder, PANIC_PARAMS, 'cohesionDrop', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 1,
+  });
+  addParam(panicFolder, PANIC_PARAMS, 'speedBoost', {
+    min: 0,
+    max: 2,
+    step: 0.05,
+    hardMin: 0,
+    hardMax: 5,
+  });
+  addParam(panicFolder, PANIC_PARAMS, 'predictionTime', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 3,
+  });
+  panicFolder
+    .addButton({ title: 'startle one fish 〰' })
+    .on('click', () => flock.startleOne());
+
+  const predatorFolder = pane.addFolder({
+    title: 'predator 捕食者',
+    expanded: false,
+  });
+  const predatorParams = predator.params ?? PREDATOR_PARAMS;
+  addParam(predatorFolder, predatorParams, 'enabled');
+  addParam(predatorFolder, predatorParams, 'captureEnabled', {
+    label: 'capture enabled',
+  });
+  addParam(predatorFolder, predatorParams, 'count', {
+    label: 'predator count',
+    min: 1,
+    max: 15,
+    step: 1,
+    hardMin: 1,
+    hardMax: 64,
+    onChange: (ev) => {
+      if (ev.last) predator.setCount(ev.value);
+    },
+  });
+  for (const [key, label, min, max, step] of [
+    ['cruiseSpeed', 'cruise speed', 0.02, 1, 0.01],
+    ['maxSpeed', 'max speed', 0.05, 1.5, 0.01],
+    ['maxForce', 'max force', 0.05, 10, 0.05],
+    ['turnSpeed', 'turn rad/s', 0.1, 8, 0.1],
+    ['bodyScale', 'body scale', 0.5, 4, 0.05],
+    ['schoolSenseRadius', 'school sense r', 0.05, 3, 0.05],
+    ['schoolAttractionWeight', 'school attraction', 0, 6, 0.05],
+    ['targetPursuitWeight', 'target pursuit', 0, 6, 0.05],
+    ['targetLockTime', 'target lock s', 0, 3, 0.05],
+    ['alarmPredatorRadius', 'alarm radius', 0, 0.8, 0.01],
+    ['alarmPredatorWeight', 'alarm weight', 0, 20, 0.25],
+    ['detectionLength', 'detection length', 0.02, 1.5, 0.01],
+    ['avoidanceWeight', 'avoidance weight', 0, 8, 0.1],
+    ['predatorSeparationRadius', 'predator sep r', 0, 0.8, 0.01],
+    ['predatorSeparationWeight', 'predator sep w', 0, 6, 0.05],
+    ['captureRadius', 'capture radius', 0.005, 0.25, 0.005],
+    ['captureCooldown', 'capture cooldown', 0, 4, 0.05],
+    ['targetLeadTime', 'target lead s', 0, 1, 0.01],
+  ]) {
+    addParam(predatorFolder, predatorParams, key, {
+      label,
+      min,
+      max,
+      step,
+      hardMin: 0,
+      hardMax: max * 4,
+    });
+  }
+  predatorFolder
+    .addButton({ title: 'reset predator ↺' })
+    .on('click', () => predator.reset());
+
+  const captureFxFolder = pane.addFolder({
+    title: 'capture fx 吞食动效',
+    expanded: false,
+  });
+  addParam(captureFxFolder, CAPTURE_FX_PARAMS, 'enabled');
+  addParam(captureFxFolder, CAPTURE_FX_PARAMS, 'particleCount', {
+    label: 'cube count',
+    min: 1,
+    max: 8,
+    step: 1,
+    hardMin: 1,
+    hardMax: 12,
+  });
+  addParam(captureFxFolder, CAPTURE_FX_PARAMS, 'cubeColor', {
+    label: 'cube color',
+  });
+  addParam(captureFxFolder, CAPTURE_FX_PARAMS, 'biteGlowEnabled', {
+    label: 'bite glow',
+  });
+  for (const [key, label, min, max, step] of [
+    ['density', 'cube density', 0.1, 4, 0.05],
+    ['spawnRadius', 'spawn radius', 0.005, 0.2, 0.005],
+    ['spawnInterval', 'sequence interval s', 0, 0.3, 0.005],
+    ['lifetime', 'linear decay s', 0.05, 1.5, 0.01],
+    ['cubeSize', 'cube size', 0.003, 0.06, 0.001],
+    ['upwardSpeed', 'up speed', 0, 1, 0.01],
+    ['radialSpeed', 'radial speed', 0, 1, 0.01],
+    ['reverseVelocityFactor', 'reverse velocity', 0, 2, 0.01],
+    ['biteFlashDuration', 'bite flash s', 0.05, 1, 0.01],
+    ['biteFlashScaleBoost', 'bite scale boost', 0, 1, 0.01],
+    ['biteFlashSaturationBoost', 'bite sat boost', 0, 1, 0.01],
+    ['biteFlashDarken', 'bite darken', 0, 0.5, 0.01],
+    ['biteGlowRadius', 'glow radius', 0.05, 1, 0.01],
+    ['biteGlowDuration', 'glow duration', 0.05, 1.5, 0.01],
+    ['biteGlowStrength', 'glow strength', 0, 1.5, 0.01],
+    ['biteGlowFalloff', 'glow falloff k', 0.2, 8, 0.1],
+  ]) {
+    addParam(captureFxFolder, CAPTURE_FX_PARAMS, key, {
+      label,
+      min,
+      max,
+      step,
+      hardMin: 0,
+      hardMax: max * 4,
+    });
+  }
+
+  const cameraFolder = pane.addFolder({
+    title: 'camera 视角',
+    expanded: false,
+  });
+  const cameraSettings = presentation.cameraSettings;
+  addParam(cameraFolder, cameraSettings, 'fov', {
+    min: 25,
+    max: 80,
+    step: 1,
+    hardMin: 20,
+    hardMax: 100,
+  });
+  addParam(cameraFolder, cameraSettings, 'orbitEnabled', {
+    label: 'drag orbit',
+  });
+  addParam(cameraFolder, cameraSettings, 'autoRotate', {
+    label: 'auto rotate',
+  });
+  addParam(cameraFolder, cameraSettings, 'autoRotateSpeed', {
+    label: 'rotate speed',
+    min: -4,
+    max: 4,
+    step: 0.05,
+    hardMin: -12,
+    hardMax: 12,
+  });
+  addParam(cameraFolder, cameraSettings, 'damping', {
+    min: 0.01,
+    max: 0.25,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 1,
+  });
+  const cameraUI = { view: 'home' };
+  addParam(cameraFolder, cameraUI, 'view', {
+    label: 'preset / key',
+    options: {
+      '0 home': 'home',
+      '1 front': 'front',
+      '3 side': 'side',
+      '7 top': 'top',
+    },
+    onChange: (ev) => presentation.setViewPreset(ev.value),
+  });
+
   // Tank dims 水槽 — platform-selected at boot (scaling model A: only
   // the tank scales; creature-scale params stay put). Live-tunable for
   // the multi-gyre space experiment; shell + camera follow on release.
@@ -183,9 +699,30 @@ export function createDebug({ world, scene, input, presentation, flock }) {
   const onTankSlider = (ev) => {
     if (ev.last) notifyTankChange();
   };
-  addParam(tankFolder, TANK, 'width', { min: 0.4, max: 4, step: 0.05, hardMin: 0.2, hardMax: 10 }).on('change', onTankSlider);
-  addParam(tankFolder, TANK, 'height', { min: 0.3, max: 3, step: 0.05, hardMin: 0.2, hardMax: 10 }).on('change', onTankSlider);
-  addParam(tankFolder, TANK, 'depth', { min: 0.2, max: 3, step: 0.05, hardMin: 0.1, hardMax: 10 }).on('change', onTankSlider);
+  addParam(tankFolder, TANK, 'width', {
+    min: 0.4,
+    max: 4,
+    step: 0.05,
+    hardMin: 0.2,
+    hardMax: 10,
+    onChange: onTankSlider,
+  });
+  addParam(tankFolder, TANK, 'height', {
+    min: 0.3,
+    max: 3,
+    step: 0.05,
+    hardMin: 0.2,
+    hardMax: 10,
+    onChange: onTankSlider,
+  });
+  addParam(tankFolder, TANK, 'depth', {
+    min: 0.2,
+    max: 3,
+    step: 0.05,
+    hardMin: 0.1,
+    hardMax: 10,
+    onChange: onTankSlider,
+  });
   const applyTankPreset = (dims) => {
     Object.assign(TANK, dims);
     for (const r of registry) r.ensureVisible();
@@ -198,6 +735,28 @@ export function createDebug({ world, scene, input, presentation, flock }) {
     .addButton({ title: 'desktop dims 2.0×1.2×0.8' })
     .on('click', () => applyTankPreset(TANK_PRESETS.desktop));
 
+  // Face grid is a depth cue only. Keep it next to the tank dims so the
+  // operator can judge camera angle without hunting through visualizers.
+  addParam(tankFolder, TANK_VISUAL_PARAMS, 'gridEnabled', {
+    label: 'depth grid',
+  });
+  addParam(tankFolder, TANK_VISUAL_PARAMS, 'gridOpacity', {
+    label: 'grid opacity',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hardMin: 0,
+    hardMax: 1,
+  });
+  addParam(tankFolder, TANK_VISUAL_PARAMS, 'gridDivisions', {
+    label: 'grid divisions',
+    min: 1,
+    max: 12,
+    step: 1,
+    hardMin: 1,
+    hardMax: 24,
+  });
+
   const boidsFolder = pane.addFolder({ title: 'boids 鱼群', expanded: false });
   addParam(boidsFolder, BOID_PARAMS, 'fishCount', {
     min: 1,
@@ -205,8 +764,9 @@ export function createDebug({ world, scene, input, presentation, flock }) {
     step: 1,
     hardMin: 1,
     hardMax: 10000,
-  }).on('change', (ev) => {
-    if (ev.last) flock.setCount(ev.value); // rebuild once, on release
+    onChange: (ev) => {
+      if (ev.last) flock.setCount(ev.value); // rebuild once, on release
+    },
   });
   addParam(boidsFolder, BOID_PARAMS, 'cruiseSpeed', { min: 0.02, max: 0.6, step: 0.01, hardMin: 0.01 });
   addParam(boidsFolder, BOID_PARAMS, 'maxSpeed', { min: 0.05, max: 0.8, step: 0.01, hardMin: 0.01 });
@@ -238,11 +798,13 @@ export function createDebug({ world, scene, input, presentation, flock }) {
   // gravity) — the bridge is one compact JSON line: copy here, paste
   // there, apply. localStorage is the per-browser scratchpad of
   // works-in-progress; presets/*.json in the repo (★ built-ins) is the
-  // committed archive of locked aesthetic decisions. Presets cover
-  // BOID_PARAMS only — input tuning (One Euro etc.) is per-device by
-  // design and keeps its own baseline preset.
+  // committed archive of locked aesthetic decisions. Presets cover the
+  // complete behaviour model; input tuning (One Euro etc.) remains
+  // per-device by design.
   const LS_KEY = 'boid-aquarium.presets.v1';
-  const builtins = { [m1StandingWave.name]: m1StandingWave.params };
+  const builtins = {
+    [m1StandingWave.name]: { boids: m1StandingWave.params },
+  };
   const readStore = () => {
     try {
       return JSON.parse(localStorage.getItem(LS_KEY)) || {};
@@ -256,32 +818,47 @@ export function createDebug({ world, scene, input, presentation, flock }) {
   const presetFolder = pane.addFolder({ title: 'presets 预设', expanded: false });
   presetFolder.addBinding(presetUI, 'name', { label: 'name' });
 
-  // Code defaults captured before any preset touches BOID_PARAMS — the
-  // "missing keys → defaults" half of the additive-only schema rule.
-  const PARAM_DEFAULTS = { ...BOID_PARAMS };
+  // All behaviour layers share one versioned snapshot. Existing browser
+  // presets that contain a bare BOID_PARAMS object remain loadable.
+  const tuningTargets = {
+    boids: BOID_PARAMS,
+    traits: TRAITS,
+    mapping: TRAIT_MAPPING,
+    energy: ENERGY_PARAMS,
+    panic: PANIC_PARAMS,
+    predator: predatorParams,
+    captureFx: CAPTURE_FX_PARAMS,
+  };
+  const tuningDefaults = Object.fromEntries(
+    Object.entries(tuningTargets).map(([name, target]) => [name, { ...target }])
+  );
+  const tuningSnapshot = () =>
+    Object.fromEntries(
+      Object.entries(tuningTargets).map(([name, target]) => [name, { ...target }])
+    );
 
   function applyParams(params, sourceLabel, tunedTank) {
-    let applied = 0;
-    const skipped = [];
-    for (const [k, v] of Object.entries(params)) {
-      if (k in BOID_PARAMS && typeof v === typeof BOID_PARAMS[k]) {
-        BOID_PARAMS[k] = v;
-        applied++;
-      } else {
-        skipped.push(k);
-      }
+    const transaction = stageTuningPreset(
+      params,
+      tuningTargets,
+      tuningDefaults
+    );
+    if (!transaction.ok) {
+      presetUI.status = `${sourceLabel}: rejected · ${transaction.error}`;
+      return false;
     }
-    // Keys the preset predates fall back to code defaults — an old
-    // preset must reproduce its bottled aesthetic even after new
-    // params (e.g. perceptionFOV) join the schema. A preset is a full
-    // snapshot, not a partial tweak.
-    for (const k of Object.keys(BOID_PARAMS)) {
-      if (!(k in params)) BOID_PARAMS[k] = PARAM_DEFAULTS[k];
+
+    for (const [groupName, values] of Object.entries(transaction.staged)) {
+      Object.assign(tuningTargets[groupName], values);
     }
-    // setCount both rebuilds the school and normalizes fishCount; the
-    // slider's own change handler only fires on user input, not here.
-    flock.setCount(BOID_PARAMS.fishCount);
-    for (const r of registry) r.ensureVisible();
+
+    if (Object.keys(transaction.staged).length > 0) {
+      // setCount both rebuilds the school and normalizes fishCount; the
+      // slider's own change handler only fires on user input, not here.
+      flock.setCount(BOID_PARAMS.fishCount);
+      predator.reset();
+      for (const r of registry) r.ensureVisible();
+    }
     // The tank key is informational, never applied: a preset describes
     // the school; the tank is the venue. But warn when they differ —
     // radius params don't transfer verbatim across tank scales.
@@ -293,9 +870,12 @@ export function createDebug({ world, scene, input, presentation, flock }) {
         ? ` · tuned in ${tunedTank.width}×${tunedTank.height}×${tunedTank.depth}`
         : '';
     presetUI.status =
-      `${sourceLabel}: ${applied} params` +
-      (skipped.length ? ` · ignored ${skipped.join(', ')}` : '') +
+      `${sourceLabel}: ${transaction.applied} params` +
+      (transaction.skipped.length
+        ? ` · ignored ${transaction.skipped.join(', ')}`
+        : '') +
       mismatch;
+    return true;
   }
 
   let savedList = null;
@@ -330,7 +910,7 @@ export function createDebug({ world, scene, input, presentation, flock }) {
       return;
     }
     const store = readStore();
-    store[name] = { ...BOID_PARAMS };
+    store[name] = tuningSnapshot();
     writeStore(store);
     presetUI.saved = name;
     rebuildList();
@@ -368,7 +948,7 @@ export function createDebug({ world, scene, input, presentation, flock }) {
       // Radius params don't transfer verbatim across tank scales —
       // that's inherent to scaling model A, not a bug.
       tank: { ...TANK },
-      params: { ...BOID_PARAMS },
+      params: tuningSnapshot(),
     });
     presetUI.paste = json; // always mirrored — manual-copy fallback
     pasteBinding.refresh();
@@ -406,10 +986,15 @@ export function createDebug({ world, scene, input, presentation, flock }) {
   // Perception radii: three wireframe spheres around fish[0]. Numbers
   // are meaningless; wrapped around a swimming fish they're legible.
   const radiiGroup = new THREE.Group();
-  const radiusSpheres = ['#ff9d9d', '#9dc9ff', '#a8ff9d'].map((color) => {
+  const radiusSpheres = [0.14, 0.24, 0.34].map((opacity) => {
     const s = new THREE.Mesh(
       new THREE.SphereGeometry(1, 16, 12),
-      new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.15 })
+      new THREE.MeshBasicMaterial({
+        color: '#8aa9c2',
+        wireframe: true,
+        transparent: true,
+        opacity,
+      })
     );
     radiiGroup.add(s);
     return s;
@@ -425,7 +1010,7 @@ export function createDebug({ world, scene, input, presentation, flock }) {
   lineGeo.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
   const forceLines = new THREE.LineSegments(
     lineGeo,
-    new THREE.LineBasicMaterial({ color: '#ffb347' })
+    new THREE.LineBasicMaterial({ color: '#8aa9c2' })
   );
   forceLines.frustumCulled = false;
   forceLines.visible = false;
@@ -442,7 +1027,7 @@ export function createDebug({ world, scene, input, presentation, flock }) {
   fovGeo.setAttribute('position', new THREE.BufferAttribute(fovPositions, 3));
   const fovCone = new THREE.LineSegments(
     fovGeo,
-    new THREE.LineBasicMaterial({ color: '#c9a2ff', transparent: true, opacity: 0.5 })
+    new THREE.LineBasicMaterial({ color: '#8aa9c2', transparent: true, opacity: 0.62 })
   );
   fovCone.frustumCulled = false;
   fovCone.visible = false;
@@ -477,35 +1062,148 @@ export function createDebug({ world, scene, input, presentation, flock }) {
 
   pane
     .addButton({ title: 'reset all ↺' })
-    .on('click', () => resets.forEach((r) => r()));
+    .on('click', () => {
+      resets.forEach((r) => r());
+      notifyTankChange();
+      flock.setCount(BOID_PARAMS.fishCount);
+      predator.reset();
+      presentation.setViewPreset('home');
+    });
 
-  // FPS lives in the corner div, not the pane — always visible, even
-  // with the panel collapsed. Feel bugs and perf bugs look identical on
-  // a phone; this number tells them apart.
-  const status = document.getElementById('status');
+  // Right-side live list: school + predator cards stay visible even when
+  // the tuning pane is collapsed. Feel bugs and perf bugs look identical
+  // on a phone; the FPS line still tells them apart.
+  const schoolHud = document.getElementById('school-hud');
+  const predatorHud = document.getElementById('predator-hud');
   let frames = 0;
   let windowStart = performance.now();
 
+  function sampleFishIndex() {
+    if (flock.positions.length === 0) return -1;
+    if (!flock.alive) return 0;
+    for (let i = 0; i < flock.alive.length; i++) {
+      if (flock.alive[i]) return i;
+    }
+    return -1;
+  }
+
+  function fallbackAliveCount() {
+    if (!flock.alive) return flock.positions.length;
+    let count = 0;
+    for (let i = 0; i < flock.alive.length; i++) count += flock.alive[i] ? 1 : 0;
+    return count;
+  }
+
+  function fallbackPanicCount() {
+    if (!flock.panic) return 0;
+    let count = 0;
+    for (let i = 0; i < flock.panic.length; i++) {
+      if ((!flock.alive || flock.alive[i]) && flock.panic[i] > 0.35) count++;
+    }
+    return count;
+  }
+
+  function fallbackEnergyRatio() {
+    if (!flock.energy?.length) return 1;
+    const capacity = Math.max(flock.derived?.energyCapacity ?? 1, 1e-6);
+    let total = 0;
+    let count = 0;
+    for (let i = 0; i < flock.energy.length; i++) {
+      if (!flock.alive || flock.alive[i]) {
+        total += flock.energy[i] / capacity;
+        count++;
+      }
+    }
+    return count ? total / count : 0;
+  }
+
+
+  function fallbackAverageSpeed() {
+    if (!flock.velocities?.length) return 0;
+    let total = 0;
+    let count = 0;
+    for (let i = 0; i < flock.velocities.length; i++) {
+      if (flock.alive && !flock.alive[i]) continue;
+      total += flock.velocities[i].length();
+      count++;
+    }
+    return count ? total / count : 0;
+  }
+
+
+
+  function formatHudCard(title, rows) {
+    const lines = [title];
+    for (const [label, value] of rows) {
+      const pad = Math.max(1, 14 - String(label).length);
+      lines.push(`${label}${' '.repeat(pad)}${value}`);
+    }
+    return lines.join('\n');
+  }
+
+  function predatorHudStats() {
+    const agents = predator.agents ?? [];
+    const enabled = Boolean(predator.params?.enabled) && agents.length > 0;
+    let striking = 0;
+    let locked = 0;
+    let cooling = 0;
+    let flashing = 0;
+    let speedSum = 0;
+    let captureSum = 0;
+    for (const agent of agents) {
+      if (agent.alarmActive) striking++;
+      if (agent.targetIndex >= 0) locked++;
+      if ((agent.captureCooldown ?? 0) > 0) cooling++;
+      if (
+        Number.isFinite(agent.biteFlashAge) &&
+        agent.biteFlashAge <
+          (predator.captureVfx?.params?.biteFlashDuration ?? 0.2)
+      ) {
+        flashing++;
+      }
+      speedSum += agent.velocity?.length?.() ?? 0;
+      captureSum += agent.captures ?? 0;
+    }
+    return {
+      enabled,
+      count: agents.length,
+      striking,
+      locked,
+      cooling,
+      flashing,
+      avgSpeed: agents.length ? speedSum / agents.length : 0,
+      captures: predator.captures ?? captureSum,
+    };
+  }
+
   function update(nowMs) {
     const g = world.gravity;
+    const phenotype = flock.derived ?? BOID_PARAMS;
+    const sample = sampleFishIndex();
     arrow.visible = view.gravityArrow;
 
-    radiiGroup.visible = view.perceptionRadii;
-    if (view.perceptionRadii && flock.positions.length > 0) {
-      radiiGroup.position.copy(flock.positions[0]);
-      radiusSpheres[0].scale.setScalar(Math.max(BOID_PARAMS.separationRadius, 1e-4));
-      radiusSpheres[1].scale.setScalar(Math.max(BOID_PARAMS.alignmentRadius, 1e-4));
-      radiusSpheres[2].scale.setScalar(Math.max(BOID_PARAMS.cohesionRadius, 1e-4));
+    radiiGroup.visible = view.perceptionRadii && sample >= 0;
+    if (radiiGroup.visible) {
+      radiiGroup.position.copy(flock.positions[sample]);
+      radiusSpheres[0].scale.setScalar(
+        Math.max(phenotype.separationRadius, 1e-4)
+      );
+      radiusSpheres[1].scale.setScalar(
+        Math.max(phenotype.alignmentRadius, 1e-4)
+      );
+      radiusSpheres[2].scale.setScalar(
+        Math.max(phenotype.cohesionRadius, 1e-4)
+      );
     }
 
-    fovCone.visible = view.visionCone && flock.positions.length > 0;
+    fovCone.visible = view.visionCone && sample >= 0;
     if (fovCone.visible) {
       if (BOID_PARAMS.perceptionFOV !== fovBuiltFor) {
         rebuildFovGeometry(BOID_PARAMS.perceptionFOV);
       }
-      fovCone.position.copy(flock.positions[0]);
+      fovCone.position.copy(flock.positions[sample]);
       // Same roll-locked basis as the fish mesh: local +Z = heading.
-      _fovF.copy(flock.velocities[0]).normalize();
+      _fovF.copy(flock.velocities[sample]).normalize();
       _fovR.crossVectors(_worldUp, _fovF);
       if (_fovR.lengthSq() < 1e-10) _fovR.set(1, 0, 0);
       _fovR.normalize();
@@ -513,7 +1211,7 @@ export function createDebug({ world, scene, input, presentation, flock }) {
       _fovM.makeBasis(_fovR, _fovU, _fovF);
       fovCone.quaternion.setFromRotationMatrix(_fovM);
       fovCone.scale.setScalar(
-        Math.max(BOID_PARAMS.alignmentRadius, BOID_PARAMS.cohesionRadius, 1e-4)
+        Math.max(phenotype.alignmentRadius, phenotype.cohesionRadius, 1e-4)
       );
     }
 
@@ -545,7 +1243,105 @@ export function createDebug({ world, scene, input, presentation, flock }) {
     frames++;
     if (nowMs - windowStart > 500) {
       const fps = Math.round((frames * 1000) / (nowMs - windowStart));
-      status.textContent = `${fps} fps${input.active ? '  tilt ✓' : ''}`;
+      let measured = {};
+      try {
+        measured = flock.metrics?.() ?? {};
+      } catch {
+        // The panel is diagnostic: a metrics bug must not stop rendering.
+      }
+      const total =
+        measured.initial ??
+        measured.initialCount ??
+        flock.initialCount ??
+        flock.positions.length;
+      const alive =
+        measured.alive ??
+        measured.aliveCount ??
+        measured.survivors ??
+        fallbackAliveCount();
+      const panicked =
+        measured.panicked ??
+        measured.panic ??
+        measured.panicCount ??
+        fallbackPanicCount();
+      const energyRatio =
+        measured.averageEnergyRatio ??
+        measured.energyRatio ??
+        measured.avgEnergyRatio ??
+        fallbackEnergyRatio();
+      const stamina = THREE.MathUtils.clamp(energyRatio, 0, 1);
+      const avgSpeed =
+        measured.averageSpeed ??
+        measured.avgSpeed ??
+        fallbackAverageSpeed();
+      const pct = Math.round(stamina * 100);
+
+      runtime.alive = `${alive} / ${total}`;
+      runtime.panic = `${panicked}`;
+      runtime.energy = `${pct}%`;
+      runtime.predators =
+        `${predator.agents?.length ?? (predator.params?.enabled ? 1 : 0)}` +
+        ` / ${predator.captures ?? 0}`;
+
+      const d = flock.derived ?? {};
+      const f = (value, digits = 2) =>
+        Number.isFinite(value) ? value.toFixed(digits) : '—';
+      derived.form = `×${f(d.bodyScale)} / ${f(d.turnSpeed)} rad`;
+      derived.speed = `${f(d.cruiseSpeed)} / ${f(d.maxSpeed)}`;
+      derived.radii = `${f(d.separationRadius)} / ${f(
+        d.alignmentRadius
+      )} / ${f(d.cohesionRadius)}`;
+      derived.weights = `${f(d.separationWeight)} / ${f(
+        d.alignmentWeight
+      )} / ${f(d.cohesionWeight)}`;
+      derived.capacity = f(d.energyCapacity);
+      for (const binding of liveBindings) binding.refresh();
+
+      const deaths = measured.deaths ?? flock.deaths ?? {};
+      const eaten = deaths.eaten ?? 0;
+      const starved = deaths.starved ?? 0;
+      const survivalPct = total > 0 ? Math.round((alive / total) * 100) : 0;
+      const schoolMode =
+        panicked > 0 ? 'PANIC' : alive <= 0 ? 'GONE' : stamina < 0.35 ? 'TIRED' : 'SWIM';
+
+      if (schoolHud) {
+        schoolHud.textContent = formatHudCard('鱼群 school', [
+          ['fps', `${fps}`],
+          ['mode', schoolMode],
+          ['alive', `${alive} / ${total}`],
+          ['survive', `${survivalPct}%`],
+          ['panic', `${panicked}`],
+          ['stamina', `${pct}%`],
+          ['speed', `${f(avgSpeed, 3)} m/s`],
+          ['cruise', `${f(d.cruiseSpeed)} / ${f(d.maxSpeed)}`],
+          ['body', `×${f(d.bodyScale)}`],
+          ['eaten', `${eaten}`],
+          ['starved', `${starved}`],
+          ['tilt', input.active ? 'ON' : 'OFF'],
+        ]);
+      }
+
+      if (predatorHud) {
+        const p = predatorHudStats();
+        const mode = !p.enabled
+          ? 'OFF'
+          : p.striking > 0
+            ? 'STRIKE'
+            : p.locked > 0
+              ? 'HUNT'
+              : 'PATROL';
+        predatorHud.textContent = formatHudCard('猎食者 predator', [
+          ['mode', mode],
+          ['count', `${p.count}`],
+          ['strike', `${p.striking}`],
+          ['locked', `${p.locked}`],
+          ['cooldown', `${p.cooling}`],
+          ['flash', `${p.flashing}`],
+          ['eaten', `${p.captures}`],
+          ['speed', `${f(p.avgSpeed, 3)} m/s`],
+        ]);
+      }
+
       frames = 0;
       windowStart = nowMs;
     }

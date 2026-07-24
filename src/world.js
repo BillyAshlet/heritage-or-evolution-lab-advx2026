@@ -32,7 +32,8 @@ export function notifyTankChange() {
 export const GRAVITY = 9.81;
 
 const FIXED_DT = 1 / 60;
-const MAX_CATCHUP_STEPS = 5; // after a tab-switch, don't replay the whole gap
+const BASE_MAX_CATCHUP_STEPS = 5; // after a tab-switch, don't replay the whole gap
+const MAX_CATCHUP_STEPS_CAP = 48; // hard ceiling so 4× speed cannot melt a phone
 
 export class World {
   constructor() {
@@ -40,20 +41,36 @@ export class World {
     this.gravity = new THREE.Vector3(0, -GRAVITY, 0);
     // Anything with step(dt), executed in order. Empty until M1.
     this.systems = [];
+    // Simulation speed multiplies real elapsed time before the fixed-step
+    // integrator. 1 = realtime, 2 = twice as many 1/60 s physics steps.
+    this.timeScale = 1;
     this._accumulator = 0;
     this._lastMs = null;
   }
 
   // Fixed-timestep physics: however fast the display renders, physics
   // advances in identical 1/60 s steps so the game feels the same on a
-  // 60 Hz iPhone and a 120 Hz one.
+  // 60 Hz iPhone and a 120 Hz one. timeScale only changes how many of
+  // those steps fire per real second.
   step(nowMs) {
     if (this._lastMs === null) this._lastMs = nowMs;
-    const elapsed = (nowMs - this._lastMs) / 1000;
+    const realElapsed = Math.max(0, (nowMs - this._lastMs) / 1000);
     this._lastMs = nowMs;
+
+    const scale = Number.isFinite(this.timeScale)
+      ? Math.min(8, Math.max(0, this.timeScale))
+      : 1;
+    this.timeScale = scale;
+    if (scale <= 0) return;
+
+    const simElapsed = realElapsed * scale;
+    const maxCatchupSteps = Math.min(
+      MAX_CATCHUP_STEPS_CAP,
+      Math.max(BASE_MAX_CATCHUP_STEPS, Math.ceil(BASE_MAX_CATCHUP_STEPS * scale))
+    );
     this._accumulator = Math.min(
-      this._accumulator + elapsed,
-      MAX_CATCHUP_STEPS * FIXED_DT
+      this._accumulator + simElapsed,
+      maxCatchupSteps * FIXED_DT
     );
     while (this._accumulator >= FIXED_DT) {
       for (const system of this.systems) system.step(FIXED_DT);

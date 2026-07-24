@@ -1,19 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <title>the boid 水族馆</title>
+    <title>遗产 · 鱼群行为实验室</title>
     <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace,
+          monospace;
+      }
       html,
       body {
         margin: 0;
         height: 100%;
         overflow: hidden;
-        background: #071e3d;
+        background: #f4efe6;
         touch-action: none;
       }
       /* Everything lives inside #app so presentation rotation moves the
@@ -26,37 +32,132 @@
         height: 100%;
         transform-origin: top left;
       }
+      #app::after {
+        position: absolute;
+        inset: 0;
+        border: 1px solid #c8d8e6;
+        content: "";
+        pointer-events: none;
+      }
       canvas {
         display: block;
       }
-      #status {
+      #lab-mark {
         position: absolute;
-        left: 12px;
-        bottom: max(12px, env(safe-area-inset-bottom));
-        color: #9db8d8;
-        font: 12px/1.5 "Space Mono", ui-monospace, monospace;
+        top: max(14px, env(safe-area-inset-top));
+        left: max(16px, env(safe-area-inset-left));
+        z-index: 2;
+        color: #4d6477;
+        background: #f4efe6;
+        padding: 8px 10px;
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.16em;
+        line-height: 1.55;
         pointer-events: none;
+        text-transform: uppercase;
+      }
+      #lab-mark span {
+        display: block;
+        color: #6d8497;
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+      }
+      #info-rail {
+        position: absolute;
+        right: max(10px, env(safe-area-inset-right));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        z-index: 4;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: min(220px, calc(100% - 20px));
+        pointer-events: none;
+      }
+      .info-card {
+        color: #4d6477;
+        background: rgba(247, 242, 234, 0.94);
+        border: 1px solid #c8d8e6;
+        padding: 8px 10px;
+        font-family: inherit;
+        font-size: 10px;
+        line-height: 1.55;
+        letter-spacing: 0.04em;
         white-space: pre;
+      }
+      .info-card .hud-title {
+        display: block;
+        color: #6d8497;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .info-card .hud-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        white-space: nowrap;
+      }
+      .info-card .hud-label {
+        color: #6d8497;
+      }
+      .info-card .hud-value {
+        color: #4d6477;
+        font-variant-numeric: tabular-nums;
       }
       #panel-holder {
         position: absolute;
-        top: 8px;
-        right: 8px;
-        width: 256px;
+        top: max(10px, env(safe-area-inset-top));
+        right: max(10px, env(safe-area-inset-right));
+        width: min(304px, calc(100% - 20px));
         z-index: 5;
         /* Panel grew past the viewport: native scroll on the holder.
            touch-action must override the body's `none` or mobile
            touch-scroll dies; pan-y still lets sliders capture drags. */
-        max-height: calc(100% - 16px);
+        max-height: calc(100% - 20px);
+        padding-bottom: 210px;
         overflow-y: auto;
         overscroll-behavior: contain;
         touch-action: pan-y;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: thin;
       }
+      #panel-holder > .tp-dfwv,
+      #panel-holder > .tp-rotv {
+        position: relative;
+        top: auto;
+        right: auto;
+        width: 100%;
+        --tp-base-background-color: #f7f2ea;
+        --tp-base-border-radius: 0;
+        --tp-base-font-family:
+          "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace,
+          monospace;
+        --tp-base-shadow-color: transparent;
+        --tp-button-background-color: #e7f1f8;
+        --tp-button-background-color-active: #d3e4f1;
+        --tp-button-background-color-focus: #dceaf4;
+        --tp-button-background-color-hover: #e1edf6;
+        --tp-button-foreground-color: #4d6477;
+        --tp-container-background-color: #efe8dc;
+        --tp-container-background-color-active: #e4dccf;
+        --tp-container-background-color-focus: #e9e1d4;
+        --tp-container-background-color-hover: #ebe3d7;
+        --tp-container-foreground-color: #4d6477;
+        --tp-groove-foreground-color: #c8d8e6;
+        --tp-input-background-color: #fbf8f2;
+        --tp-input-background-color-active: #e7f1f8;
+        --tp-input-background-color-focus: #edf5fa;
+        --tp-input-background-color-hover: #f3f8fc;
+        --tp-input-foreground-color: #4d6477;
+        --tp-label-foreground-color: #5d7588;
+        --tp-monitor-background-color: #fbf8f2;
+        --tp-monitor-foreground-color: #4d6477;
+      }
       .param-btn {
         cursor: pointer;
-        opacity: 0.45;
+        opacity: 0.62;
         margin-left: 5px;
         user-select: none;
       }
@@ -69,20 +170,45 @@
         bottom: 18%;
         transform: translateX(-50%);
         padding: 14px 28px;
-        font: 14px "Space Mono", ui-monospace, monospace;
-        color: #cfe3f7;
-        background: rgba(12, 84, 166, 0.35);
-        border: 1px solid #2e6db4;
-        border-radius: 8px;
+        font-family: inherit;
+        font-size: 12px;
+        line-height: 1;
+        letter-spacing: 0.12em;
+        color: #4d6477;
+        background: #f4efe6;
+        border: 1px solid #c8d8e6;
+        border-radius: 0;
         -webkit-tap-highlight-color: transparent;
+      }
+      @media (max-width: 680px) {
+        #lab-mark {
+          display: none;
+        }
+        #panel-holder {
+          width: min(272px, calc(100% - 16px));
+          top: 8px;
+          right: 8px;
+          max-height: calc(100% - 16px);
+          padding-bottom: 230px;
+        }
+        #info-rail {
+          width: min(200px, calc(100% - 16px));
+        }
       }
     </style>
   </head>
   <body>
     <div id="app">
-      <div id="status">…</div>
+      <div id="lab-mark">
+        遗产 · 鱼群行为实验室
+        <span>Three.js behavior sandbox</span>
+      </div>
+      <div id="info-rail">
+        <div id="school-hud" class="info-card">…</div>
+        <div id="predator-hud" class="info-card">…</div>
+      </div>
       <div id="panel-holder"></div>
-      <button id="enable-tilt" hidden>enable tilt 🌀</button>
+      <button id="enable-tilt" hidden>ENABLE TILT</button>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

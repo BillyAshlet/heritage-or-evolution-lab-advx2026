@@ -108,9 +108,19 @@ TUNING 调参 → RUNNING 演算 → VERDICT 结算 → INHERIT 封代 → 下�
 
 ### 2.5 VR（三金，隔离带）
 只消费两样东西：**scene 句柄 + 鱼群中心的相机挂载点**（北辰暴露）。
-WebXR 代码归三金。**硬规则：主 demo 在普通屏幕上必须 100% 成立，
+Godot OpenXR/PICO 适配代码归三金。**硬规则：主 demo 在普通屏幕上必须 100% 成立，
 VR 任何时刻可整体拔掉不留残根。** 帧预算问题等设备接上后再谈，
 现在一切以电脑端为准。
+
+### 2.6 运行平台（07-24 决议）
+**主交付改为 Godot 4 原生 Android APK。** `godot/` 是主项目；仓库根目录
+原 Three.js 版本只作为 boids 算法与视觉参考，不再承担正式运行入口。
+
+- 普通桌面/Android 屏幕模式必须完整跑通四阶段与三局。
+- PICO 通过独立 OpenXR 导出预设与适配节点接入，不允许模拟、lineage
+  或 UI 状态机直接依赖 XR。
+- Android 以 `arm64-v8a`、JDK 17、Compatibility/OpenGL 渲染为基线。
+- PICO/OpenXR 未接入前，普通 Android APK 不得宣称为 XR 构建。
 
 ---
 

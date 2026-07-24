@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TANK, onTankChange } from './world.js';
+import { TANK_VISUAL_PARAMS } from './evolution-model.js';
 
 // Presentation: canonical landscape → viewport. The CSS rotation comes
 // from input.js (R = −(hold + framebuffer), see the frame model there);
@@ -20,43 +21,136 @@ export function createScene(wrapper, getRotation = () => 0) {
   wrapper.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#071e3d');
+  scene.background = new THREE.Color('#f4efe6');
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
+  // Mutable on purpose: the lab panel and console both operate this same
+  // object, while updateCamera() applies it to Three.js every frame.
+  const cameraSettings = {
+    fov: 45,
+    orbitEnabled: true,
+    autoRotate: false,
+    autoRotateSpeed: 0.65,
+    damping: 0.08,
+  };
 
-  scene.add(new THREE.AmbientLight('#8fb4d8', 0.6));
-  const sun = new THREE.DirectionalLight('#ffffff', 1.2);
-  sun.position.set(0.5, 1, 0.8);
-  scene.add(sun);
-
-  // Tank shell: visible glass edges + barely-there back panes. The
-  // player must be able to see what the water bounces off. Rebuilt
-  // whenever TANK dims change.
+  // Tank shell: a soft open laboratory volume in pale beige space.
+  // BackSide draws the far interior faces while leaving the near wall open,
+  // so the fish, predator and capture cubes remain readable. A light face
+  // grid is layered on top so orbiting still reads as a 3D aquarium rather
+  // than a flat silhouette.
   let shell = null;
+
+  function buildFaceGridGeometry(width, height, depth, divisions) {
+    const div = Math.max(1, Math.round(divisions));
+    const positions = [];
+    const hw = width / 2;
+    const hh = height / 2;
+    const hd = depth / 2;
+
+    const pushLine = (ax, ay, az, bx, by, bz) => {
+      positions.push(ax, ay, az, bx, by, bz);
+    };
+
+    // Each face gets a u/v lattice. Shared box edges are drawn twice; that is
+    // intentional and cheap, and keeps the helper independent of EdgesGeometry.
+    for (let i = 0; i <= div; i++) {
+      const t = i / div;
+      const x = -hw + width * t;
+      const y = -hh + height * t;
+      const z = -hd + depth * t;
+
+      // ±Z faces (front / back)
+      pushLine(x, -hh, -hd, x, hh, -hd);
+      pushLine(-hw, y, -hd, hw, y, -hd);
+      pushLine(x, -hh, hd, x, hh, hd);
+      pushLine(-hw, y, hd, hw, y, hd);
+
+      // ±X faces (left / right)
+      pushLine(-hw, y, -hd, -hw, y, hd);
+      pushLine(-hw, -hh, z, -hw, hh, z);
+      pushLine(hw, y, -hd, hw, y, hd);
+      pushLine(hw, -hh, z, hw, hh, z);
+
+      // ±Y faces (floor / ceiling)
+      pushLine(x, -hh, -hd, x, -hh, hd);
+      pushLine(-hw, -hh, z, hw, -hh, z);
+      pushLine(x, hh, -hd, x, hh, hd);
+      pushLine(-hw, hh, z, hw, hh, z);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(positions, 3)
+    );
+    return geometry;
+  }
+
+  function syncTankGrid() {
+    if (!shell?.grid) return;
+    const enabled = Boolean(TANK_VISUAL_PARAMS.gridEnabled);
+    const opacity = Math.min(
+      1,
+      Math.max(0, Number(TANK_VISUAL_PARAMS.gridOpacity) || 0)
+    );
+    shell.grid.visible = enabled && opacity > 0;
+    shell.grid.material.opacity = opacity;
+    shell.grid.material.transparent = opacity < 1;
+    shell.grid.material.depthWrite = opacity >= 1;
+    shell.grid.material.needsUpdate = true;
+  }
+
   function buildShell() {
     if (shell) {
-      scene.remove(shell.edges, shell.panes);
+      scene.remove(shell.edges, shell.panes, shell.grid);
       shell.box.dispose();
       shell.edgesGeo.dispose();
+      shell.edges.material.dispose();
+      shell.panes.material.dispose();
+      shell.gridGeo.dispose();
+      shell.grid.material.dispose();
     }
     const box = new THREE.BoxGeometry(TANK.width, TANK.height, TANK.depth);
     const edgesGeo = new THREE.EdgesGeometry(box);
     const edges = new THREE.LineSegments(
       edgesGeo,
-      new THREE.LineBasicMaterial({ color: '#2e6db4' })
+      new THREE.LineBasicMaterial({
+        color: '#7f9bb2',
+        // Perspective aquarium: silhouette edges must keep a uniform weight
+        // even when a far pane would otherwise depth-occlude them.
+        depthTest: false,
+        depthWrite: false,
+        transparent: true,
+        opacity: 0.95,
+      })
     );
+    edges.renderOrder = 3;
     const panes = new THREE.Mesh(
       box,
       new THREE.MeshBasicMaterial({
-        color: '#0c54a6',
-        transparent: true,
-        opacity: 0.06,
+        color: '#e8f1f7',
         side: THREE.BackSide, // far walls only; the front stays clear glass
+      })
+    );
+    const gridGeo = buildFaceGridGeometry(
+      TANK.width,
+      TANK.height,
+      TANK.depth,
+      TANK_VISUAL_PARAMS.gridDivisions
+    );
+    const grid = new THREE.LineSegments(
+      gridGeo,
+      new THREE.LineBasicMaterial({
+        color: '#9eb8cf',
+        transparent: true,
+        opacity: TANK_VISUAL_PARAMS.gridOpacity,
         depthWrite: false,
       })
     );
-    scene.add(panes, edges);
-    shell = { box, edgesGeo, edges, panes };
+    scene.add(panes, edges, grid);
+    shell = { box, edgesGeo, edges, panes, gridGeo, grid };
+    syncTankGrid();
   }
   buildShell();
 
@@ -103,10 +197,53 @@ export function createScene(wrapper, getRotation = () => 0) {
     );
   }
 
+  // Named views are shared by keyboard shortcuts, the tuning panel and
+  // automated demos. They remain available on touch devices even though
+  // free orbit is intentionally desktop-only.
+  function setViewPreset(name = 'home') {
+    switch (name) {
+      case 'front':
+        userMoved = true;
+        setView(
+          new THREE.Vector3(
+            0,
+            0,
+            fitDistance(TANK.width / 2, TANK.height / 2, TANK.depth / 2)
+          )
+        );
+        break;
+      case 'side':
+      case 'right':
+        userMoved = true;
+        setView(
+          new THREE.Vector3(
+            fitDistance(TANK.depth / 2, TANK.height / 2, TANK.width / 2),
+            0,
+            0
+          )
+        );
+        break;
+      case 'top':
+        userMoved = true;
+        setView(
+          new THREE.Vector3(
+            0,
+            fitDistance(TANK.width / 2, TANK.depth / 2, TANK.height / 2),
+            0.001
+          )
+        );
+        break;
+      case 'home':
+      default:
+        home();
+        break;
+    }
+  }
+
   if (isDesktop) {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
+    controls.dampingFactor = cameraSettings.damping;
     controls.minDistance = 0.1;
     controls.maxDistance = 30;
     controls.addEventListener('start', () => {
@@ -120,40 +257,19 @@ export function createScene(wrapper, getRotation = () => 0) {
       switch (e.code) {
         case 'Digit0':
         case 'Numpad0':
-          home();
+          setViewPreset('home');
           break;
         case 'Digit1':
         case 'Numpad1': // front
-          userMoved = true;
-          setView(
-            new THREE.Vector3(
-              0,
-              0,
-              fitDistance(TANK.width / 2, TANK.height / 2, TANK.depth / 2)
-            )
-          );
+          setViewPreset('front');
           break;
         case 'Digit3':
         case 'Numpad3': // right side
-          userMoved = true;
-          setView(
-            new THREE.Vector3(
-              fitDistance(TANK.depth / 2, TANK.height / 2, TANK.width / 2),
-              0,
-              0
-            )
-          );
+          setViewPreset('side');
           break;
         case 'Digit7':
         case 'Numpad7': // top (tiny z offset keeps OrbitControls off the pole)
-          userMoved = true;
-          setView(
-            new THREE.Vector3(
-              0,
-              fitDistance(TANK.width / 2, TANK.depth / 2, TANK.height / 2),
-              0.001
-            )
-          );
+          setViewPreset('top');
           break;
       }
     });
@@ -245,6 +361,8 @@ export function createScene(wrapper, getRotation = () => 0) {
     }
   }
 
+  let lastGridDivisions = Math.round(TANK_VISUAL_PARAMS.gridDivisions);
+
   return {
     renderer,
     scene,
@@ -252,8 +370,39 @@ export function createScene(wrapper, getRotation = () => 0) {
     viewportToCanonical,
     rotationDeg: () => rotationDeg,
     updateOrientation: apply,
-    // Damped controls need a per-frame tick; no-op on mobile.
-    updateCamera: () => controls?.update(),
+    cameraSettings,
+    tankVisual: TANK_VISUAL_PARAMS,
+    setViewPreset,
+    rebuildTankShell: buildShell,
+    syncTankGrid,
+    // Damped/auto-rotate controls need a per-frame tick; no-op on mobile.
+    // FOV still remains live on every platform. Grid opacity is also cheap
+    // enough to refresh here so the tank panel feels immediate.
+    updateCamera: () => {
+      const nextFov = THREE.MathUtils.clamp(cameraSettings.fov, 20, 100);
+      if (camera.fov !== nextFov) {
+        camera.fov = nextFov;
+        camera.updateProjectionMatrix();
+      }
+      const nextDivisions = Math.max(
+        1,
+        Math.round(Number(TANK_VISUAL_PARAMS.gridDivisions) || 1)
+      );
+      if (nextDivisions !== lastGridDivisions) {
+        lastGridDivisions = nextDivisions;
+        TANK_VISUAL_PARAMS.gridDivisions = nextDivisions;
+        buildShell();
+      } else {
+        syncTankGrid();
+      }
+      if (controls) {
+        controls.enabled = cameraSettings.orbitEnabled;
+        controls.autoRotate = cameraSettings.autoRotate;
+        controls.autoRotateSpeed = cameraSettings.autoRotateSpeed;
+        controls.dampingFactor = cameraSettings.damping;
+        controls.update();
+      }
+    },
     home,
   };
 }
