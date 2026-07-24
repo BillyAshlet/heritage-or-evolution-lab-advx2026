@@ -1,4 +1,16 @@
-# evolution — 架构与分工 v2（36小时作战版）
+# experiment 分支覆盖条款（2026-07-25）
+
+> 本节是 `experiment` 分支的最高优先级实施约束。该分支只交付
+> **Vite + Three.js 的纯 Web 实验版**，不使用 Godot、Electron、Tauri
+> 或浏览器套壳。详细、可执行的技术基线见
+> [`EXPERIMENT-DEVELOPMENT.md`](./EXPERIMENT-DEVELOPMENT.md)。
+> Web 入口默认运行主水族馆；营养级联和地图刚体是隔离子实验。主项目角色
+> 由实时体型开放推导，级联专用的尺寸窗口不得成为主项目默认规则。
+>
+> 本文件下方的 36 小时 Godot 方案仅保留为项目历史，不适用于
+> `experiment` 分支；如有冲突，以本节和实验开发文档为准。
+
+# evolution — 架构与分工 v2（历史方案）
 *2026-07-23 深夜定稿 · 截止 07-25 08:00 · 本文件取代 v1，是唯一宪法*
 
 > 分工原则：**Billy 定 what（产品/效果/拍板），北辰定 how（模拟与代码

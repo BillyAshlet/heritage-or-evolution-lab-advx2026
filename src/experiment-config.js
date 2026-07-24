@@ -1,0 +1,1237 @@
+const TAU = Math.PI * 2;
+
+export function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function school({
+  id,
+  name,
+  color,
+  count,
+  size,
+  targetNeighbors,
+  centerX,
+}) {
+  return {
+    id,
+    name,
+    color,
+    count,
+    size,
+    targetNeighbors,
+    cruiseSpeed: 0.23,
+    maxSpeed: 0.46,
+    turnSpeed: 2.8,
+    separationWeight: 0.6,
+    alignmentWeight: 0.7,
+    cohesionWeight: id === 'small' ? 0.9 : id === 'medium' ? 2 : 1.2,
+    spawnRegion: {
+      centerX,
+      centerY: 0,
+      centerZ: 0,
+      radius: id === 'large' ? 0.22 : 0.3,
+    },
+    initialHeading:
+      id === 'large'
+        ? { x: 1, y: 0, z: 0 }
+        : { x: 0, y: 0, z: 1 },
+  };
+}
+
+export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
+  runtime: {
+    project: 'aquarium',
+    mode: 'steady',
+    seed: 1001,
+    timeScale: 1,
+    fixedDt: 1 / 60,
+  },
+  schools: [
+    school({
+      id: 'small',
+      name: '小群',
+      color: '#4f9fcf',
+      count: 400,
+      size: 1,
+      targetNeighbors: 8,
+      centerX: 0.32,
+    }),
+    school({
+      id: 'medium',
+      name: '中群',
+      color: '#e5a441',
+      count: 200,
+      size: 1.5,
+      targetNeighbors: 8,
+      centerX: -0.05,
+    }),
+    school({
+      id: 'large',
+      name: '大群',
+      color: '#c95252',
+      count: 40,
+      size: 2.25,
+      targetNeighbors: 2,
+      centerX: -0.38,
+    }),
+  ],
+  tank: {
+    preset: 'aquarium',
+    width: 3,
+    height: 1.8,
+    depth: 1.2,
+    wallMargin: 0.035,
+    edgeSoftness: 0.16,
+  },
+  perception: {
+    minNeighborRadiusFactor: 3,
+    alignmentRadiusFactor: 0.35,
+    separationRadiusFactor: 0.4,
+    detectionLengthFactor: 0.75,
+    crossSeparationScale: 0.15,
+    globalCohesionFactor: 0.35,
+  },
+  relations: {
+    policy: 'size',
+    k: 1.35,
+    KMax: 2,
+    hysteresis: 0.1,
+    pursuitWeight: 1.05,
+    evadeWeight: 1.3,
+    evadeLateralWeight: 0.32,
+    directThreatPanic: 0.85,
+    panicRiseRate: 4.5,
+    panicDecayRate: 1.35,
+  },
+  locomotion: {
+    burstFactor: 1.35,
+    panicSpeedFactor: 1.15,
+    maxForce: 0.72,
+    interceptLookAhead: 1.3,
+    boundaryWeight: 1.8,
+    avoidanceWeight: 2.2,
+    panicAvoidanceSuppression: 0.72,
+    avoidanceInertia: 0.72,
+    wanderWeight: 0.08,
+  },
+  visual: {
+    bodyLength: 0.03,
+    bodyRadius: 0.008,
+    radialSegments: 6,
+    opacity: 0.92,
+  },
+  capture: {
+    targetCaptureRate: 3,
+    captureLengthFactor: 0.5,
+  },
+  captureVfx: {
+    enabled: true,
+    particleCount: 12,
+    density: 2,
+    spawnRadius: 0.055,
+    spawnInterval: 0.02,
+    lifetime: 0.75,
+    cubeSize: 0.022,
+    cubeColor: '#1e4f8c',
+    upwardSpeed: 0.12,
+    reverseVelocityFactor: 0.4,
+    radialSpeed: 0.22,
+    biteGlowEnabled: true,
+    biteGlowRadius: 0.28,
+    biteGlowDuration: 0.45,
+    biteGlowStrength: 0.85,
+    biteGlowFalloff: 2.4,
+  },
+  respawn: {
+    delay: 4,
+    retryInterval: 0.5,
+    maxAttempts: 16,
+    edgeBand: 0.12,
+    predatorSafetyFactor: 1.5,
+  },
+  holding: {
+    enabled: false,
+    schoolId: 'large',
+    settleSeconds: 3,
+    baselineSeconds: 2,
+    observationSeconds: 7,
+    zoneWidth: 0.42,
+    zoneHeight: 0.72,
+    zoneDepth: 0.72,
+    wallInset: 0.06,
+    guideForce: 2.4,
+    visibleOpacity: 0.14,
+  },
+  cascadeJudge: {
+    rogRiseFraction: 0.1,
+    minPeakLag: 0.25,
+    maxDirectImpulseRatio: 0.1,
+    attributionGain: 0.1,
+    radialSpeedThreshold: 0.05,
+    minAttributionSamples: 8,
+    minAverageNeighbors: 3,
+    maxBaselineRogShortestSideFactor: 0.5,
+    sampleInterval: 0.1,
+    firstSeed: 1001,
+    lastSeed: 1010,
+    requiredPasses: 7,
+    batchStepsPerFrame: 3,
+  },
+  spatialHash: {
+    enabled: true,
+  },
+  distanceField: {
+    enabled: true,
+    cellSize: 0.05,
+    paddingCells: 1,
+    analyticRefineDistance: 0.1,
+    gradientEpsilon: 0.025,
+  },
+  obstacles: {
+    enabled: false,
+    ringA: {
+      enabled: true,
+      type: 'ring',
+      x: -0.42,
+      y: 0.05,
+      z: 0,
+      rotationX: 0,
+      rotationY: 0.22,
+      rotationZ: 0,
+      width: 0.82,
+      height: 0.72,
+      thickness: 0.08,
+      holeDiameter: 0.48,
+      frameDepth: 0.12,
+    },
+    ringB: {
+      enabled: true,
+      type: 'ring',
+      x: 0.46,
+      y: -0.08,
+      z: -0.06,
+      rotationX: 0,
+      rotationY: -0.28,
+      rotationZ: 0,
+      width: 0.76,
+      height: 0.68,
+      thickness: 0.08,
+      holeDiameter: 0.48,
+      frameDepth: 0.12,
+    },
+    blockA: {
+      enabled: true,
+      type: 'box',
+      x: -0.68,
+      y: -0.54,
+      z: 0.28,
+      rotationX: 0,
+      rotationY: 0.15,
+      rotationZ: 0,
+      width: 0.42,
+      height: 0.28,
+      depth: 0.34,
+    },
+    blockB: {
+      enabled: true,
+      type: 'box',
+      x: 0.58,
+      y: -0.48,
+      z: 0.22,
+      rotationX: 0,
+      rotationY: -0.22,
+      rotationZ: 0,
+      width: 0.54,
+      height: 0.2,
+      depth: 0.3,
+    },
+  },
+  physics: {
+    enabled: true,
+    spawnDefaults: false,
+    gravityX: 0,
+    gravityY: -0.34,
+    gravityZ: 0,
+    linearDamping: 1.45,
+    angularDamping: 1.2,
+    restitution: 0.25,
+    density: 0.55,
+    fishImpulseStrength: 0.0024,
+    fishImpulseLimit: 0.009,
+    interactionRadius: 0.055,
+    aabbPadding: 0.08,
+    dynamicRingRadius: 0.12,
+    dynamicRingTube: 0.025,
+    dynamicCubeSize: 0.14,
+    dynamicColumnRadius: 0.045,
+    dynamicColumnHeight: 0.18,
+    dynamicBaseRadius: 0.09,
+    dynamicBaseHeight: 0.035,
+    ringSpawnX: -0.62,
+    ringSpawnY: 0.45,
+    ringSpawnZ: 0.18,
+    cubeSpawnX: 0,
+    cubeSpawnY: 0.52,
+    cubeSpawnZ: -0.14,
+    columnSpawnX: 0.66,
+    columnSpawnY: 0.44,
+    columnSpawnZ: 0.14,
+  },
+  camera: {
+    fov: 45,
+    globalNear: 0.01,
+    firstPersonNear: 0.035,
+    focusDistance: 0.3,
+    focusHeight: 0.09,
+    headOffset: 0.018,
+    lookAhead: 0.2,
+    positionDamping: 12,
+    orientationDamping: 9,
+    pointerSensitivity: 0.0022,
+  },
+});
+
+export function createDefaultConfig() {
+  return deepClone(DEFAULT_EXPERIMENT_CONFIG);
+}
+
+function entry(path, group, label, applyMode, options = {}) {
+  return { path, group, label, applyMode, ...options };
+}
+
+const scalarEntries = [
+  entry('runtime.project', '项目', 'project', 'rebuildScene', {
+    options: {
+      '主项目 · 水族馆': 'aquarium',
+      '子实验 · 营养级联': 'cascade',
+      '子实验 · 地图与刚体': 'obstacle',
+    },
+  }),
+  entry('runtime.mode', 'Advanced · Runtime', 'mode', 'reset', {
+    options: { Cascade: 'cascade', 'Steady State': 'steady' },
+  }),
+  entry('runtime.seed', '运行', 'seed', 'reset', {
+    min: 1,
+    max: 999999,
+    step: 1,
+  }),
+  entry('runtime.timeScale', '运行', 'time scale', 'live', {
+    min: 0,
+    max: 4,
+    step: 0.1,
+  }),
+  entry('runtime.fixedDt', 'Advanced · Runtime', 'fixed dt', 'reset', {
+    min: 1 / 240,
+    max: 1 / 20,
+    step: 1 / 240,
+  }),
+  entry('tank.preset', '缸体', 'preset', 'rebuildScene', {
+    options: {
+      Aquarium: 'aquarium',
+      Cascade: 'cascade',
+      Obstacle: 'obstacle',
+      Custom: 'custom',
+    },
+  }),
+  entry('tank.width', '缸体', 'width', 'rebuildScene', {
+    min: 1,
+    max: 6,
+    step: 0.05,
+  }),
+  entry('tank.height', '缸体', 'height', 'rebuildScene', {
+    min: 0.6,
+    max: 3,
+    step: 0.05,
+  }),
+  entry('tank.depth', '缸体', 'depth', 'rebuildScene', {
+    min: 0.4,
+    max: 2.5,
+    step: 0.05,
+  }),
+  entry('tank.wallMargin', 'Advanced · Tank', 'wall margin', 'live', {
+    min: 0,
+    max: 0.2,
+    step: 0.005,
+  }),
+  entry('tank.edgeSoftness', 'Advanced · Tank', 'edge softness', 'live', {
+    min: 0.02,
+    max: 0.5,
+    step: 0.01,
+  }),
+  entry(
+    'perception.minNeighborRadiusFactor',
+    '感知',
+    'min radius / body',
+    'reset',
+    { min: 1, max: 8, step: 0.1 }
+  ),
+  entry(
+    'perception.alignmentRadiusFactor',
+    '感知',
+    'alignment radius ×',
+    'live',
+    { min: 0.05, max: 1, step: 0.01 }
+  ),
+  entry(
+    'perception.separationRadiusFactor',
+    '感知',
+    'separation radius ×',
+    'live',
+    { min: 0.05, max: 1, step: 0.01 }
+  ),
+  entry(
+    'perception.detectionLengthFactor',
+    '感知',
+    'detection length ×',
+    'live',
+    { min: 0.1, max: 2, step: 0.01 }
+  ),
+  entry(
+    'perception.crossSeparationScale',
+    '感知',
+    'cross separation / size',
+    'live',
+    { min: 0.02, max: 0.5, step: 0.01 }
+  ),
+  entry(
+    'perception.globalCohesionFactor',
+    '感知',
+    'global cohesion ×',
+    'live',
+    { min: 0, max: 2, step: 0.01 }
+  ),
+  entry('relations.policy', '关系', '角色规则', 'live', {
+    options: {
+      '体型自动（主项目）': 'size',
+      '尺寸窗口（级联实验）': 'window',
+    },
+  }),
+  entry('relations.k', '关系', '捕食体型阈值 k', 'live', {
+    min: 1.01,
+    max: 2,
+    step: 0.01,
+  }),
+  entry('relations.KMax', '关系', '窗口上限 K max', 'live', {
+    min: 1.1,
+    max: 4,
+    step: 0.01,
+  }),
+  entry('relations.hysteresis', '关系', 'hysteresis δ', 'live', {
+    min: 0,
+    max: 0.5,
+    step: 0.01,
+  }),
+  entry('relations.pursuitWeight', '关系', 'pursuit weight', 'live', {
+    min: 0,
+    max: 4,
+    step: 0.05,
+  }),
+  entry('relations.evadeWeight', '关系', 'evade weight', 'live', {
+    min: 0,
+    max: 4,
+    step: 0.05,
+  }),
+  entry(
+    'relations.evadeLateralWeight',
+    '关系',
+    'evade lateral',
+    'live',
+    { min: 0, max: 2, step: 0.02 }
+  ),
+  entry(
+    'relations.directThreatPanic',
+    '关系',
+    'threat panic target',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry('relations.panicRiseRate', '关系', 'panic rise /s', 'live', {
+    min: 0.1,
+    max: 20,
+    step: 0.1,
+  }),
+  entry('relations.panicDecayRate', '关系', 'panic decay /s', 'live', {
+    min: 0.1,
+    max: 10,
+    step: 0.05,
+  }),
+  entry('locomotion.burstFactor', '运动', 'pursuit burst ×', 'live', {
+    min: 1,
+    max: 3,
+    step: 0.01,
+  }),
+  entry(
+    'locomotion.panicSpeedFactor',
+    '运动',
+    'panic speed ×',
+    'live',
+    { min: 1, max: 3, step: 0.01 }
+  ),
+  entry('locomotion.maxForce', '运动', 'max steering', 'live', {
+    min: 0.05,
+    max: 4,
+    step: 0.01,
+  }),
+  entry(
+    'locomotion.interceptLookAhead',
+    '运动',
+    'intercept look-ahead',
+    'live',
+    { min: 0, max: 5, step: 0.05 }
+  ),
+  entry('locomotion.boundaryWeight', '运动', 'boundary weight', 'live', {
+    min: 0,
+    max: 6,
+    step: 0.05,
+  }),
+  entry('locomotion.avoidanceWeight', '运动', 'avoidance weight', 'live', {
+    min: 0,
+    max: 8,
+    step: 0.05,
+  }),
+  entry(
+    'locomotion.panicAvoidanceSuppression',
+    '运动',
+    'panic avoidance suppression',
+    'live',
+    { min: 0, max: 1.5, step: 0.01 }
+  ),
+  entry(
+    'locomotion.avoidanceInertia',
+    '运动',
+    'avoidance inertia',
+    'live',
+    { min: 0, max: 0.99, step: 0.01 }
+  ),
+  entry('locomotion.wanderWeight', '运动', 'wander weight', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('visual.bodyLength', 'Advanced · Visual', 'body length', 'rebuildScene', {
+    min: 0.005,
+    max: 0.12,
+    step: 0.001,
+  }),
+  entry('visual.bodyRadius', 'Advanced · Visual', 'body radius', 'rebuildScene', {
+    min: 0.002,
+    max: 0.04,
+    step: 0.001,
+  }),
+  entry(
+    'visual.radialSegments',
+    'Advanced · Visual',
+    'radial segments',
+    'rebuildScene',
+    { min: 3, max: 16, step: 1 }
+  ),
+  entry('visual.opacity', 'Advanced · Visual', 'fish opacity', 'live', {
+    min: 0.1,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('capture.targetCaptureRate', '捕获与补充', 'captures /s / school', 'live', {
+    min: 0.05,
+    max: 20,
+    step: 0.05,
+  }),
+  entry(
+    'capture.captureLengthFactor',
+    '捕获与补充',
+    'capture length ×',
+    'live',
+    { min: 0.1, max: 2, step: 0.01 }
+  ),
+  entry('captureVfx.enabled', '捕获特效', '特效启用', 'live'),
+  entry('captureVfx.particleCount', '捕获特效', '碎片数量上限', 'live', {
+    min: 1,
+    max: 24,
+    step: 1,
+  }),
+  entry('captureVfx.density', '捕获特效', '碎片密度', 'live', {
+    min: 0,
+    max: 12,
+    step: 0.1,
+  }),
+  entry('captureVfx.spawnRadius', '捕获特效', '生成半径', 'live', {
+    min: 0,
+    max: 0.3,
+    step: 0.002,
+  }),
+  entry('captureVfx.spawnInterval', '捕获特效', '碎片间隔', 'live', {
+    min: 0,
+    max: 0.2,
+    step: 0.002,
+  }),
+  entry('captureVfx.lifetime', '捕获特效', '碎片寿命', 'live', {
+    min: 0.05,
+    max: 3,
+    step: 0.05,
+  }),
+  entry('captureVfx.cubeSize', '捕获特效', '碎片尺寸', 'live', {
+    min: 0.002,
+    max: 0.08,
+    step: 0.001,
+  }),
+  entry('captureVfx.cubeColor', '捕获特效', '碎片颜色', 'live'),
+  entry('captureVfx.upwardSpeed', '捕获特效', '上浮速度', 'live', {
+    min: 0,
+    max: 2,
+    step: 0.01,
+  }),
+  entry(
+    'captureVfx.reverseVelocityFactor',
+    '捕获特效',
+    '捕食者反向速度',
+    'live',
+    { min: 0, max: 2, step: 0.01 }
+  ),
+  entry('captureVfx.radialSpeed', '捕获特效', '径向速度', 'live', {
+    min: 0,
+    max: 2,
+    step: 0.01,
+  }),
+  entry('captureVfx.biteGlowEnabled', '捕获特效', '咬合闪光', 'live'),
+  entry('captureVfx.biteGlowRadius', '捕获特效', '闪光半径', 'live', {
+    min: 0.01,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('captureVfx.biteGlowDuration', '捕获特效', '闪光时长', 'live', {
+    min: 0.02,
+    max: 2,
+    step: 0.01,
+  }),
+  entry('captureVfx.biteGlowStrength', '捕获特效', '闪光强度', 'live', {
+    min: 0,
+    max: 3,
+    step: 0.01,
+  }),
+  entry('captureVfx.biteGlowFalloff', '捕获特效', '闪光衰减', 'live', {
+    min: 0,
+    max: 12,
+    step: 0.1,
+  }),
+  entry('respawn.delay', '捕获与补充', 'respawn delay', 'live', {
+    min: 0,
+    max: 30,
+    step: 0.1,
+  }),
+  entry('respawn.retryInterval', '捕获与补充', 'retry interval', 'live', {
+    min: 0.05,
+    max: 5,
+    step: 0.05,
+  }),
+  entry('respawn.maxAttempts', '捕获与补充', 'spawn attempts', 'live', {
+    min: 1,
+    max: 100,
+    step: 1,
+  }),
+  entry('respawn.edgeBand', '捕获与补充', 'edge band', 'live', {
+    min: 0.01,
+    max: 0.5,
+    step: 0.01,
+  }),
+  entry(
+    'respawn.predatorSafetyFactor',
+    '捕获与补充',
+    'predator safety ×',
+    'live',
+    { min: 0.5, max: 5, step: 0.05 }
+  ),
+  entry('holding.enabled', 'Holding / Cascade', 'holding enabled', 'reset'),
+  entry('holding.schoolId', 'Holding / Cascade', 'held school id', 'reset'),
+  entry(
+    'holding.settleSeconds',
+    'Holding / Cascade',
+    'settle seconds',
+    'reset',
+    { min: 0, max: 20, step: 0.1 }
+  ),
+  entry(
+    'holding.baselineSeconds',
+    'Holding / Cascade',
+    'baseline seconds',
+    'reset',
+    { min: 0.5, max: 10, step: 0.1 }
+  ),
+  entry(
+    'holding.observationSeconds',
+    'Holding / Cascade',
+    'observation seconds',
+    'reset',
+    { min: 2, max: 30, step: 0.25 }
+  ),
+  entry('holding.zoneWidth', 'Holding / Cascade', 'zone width', 'reset', {
+    min: 0.1,
+    max: 1.5,
+    step: 0.01,
+  }),
+  entry('holding.zoneHeight', 'Holding / Cascade', 'zone height', 'reset', {
+    min: 0.1,
+    max: 2,
+    step: 0.01,
+  }),
+  entry('holding.zoneDepth', 'Holding / Cascade', 'zone depth', 'reset', {
+    min: 0.1,
+    max: 2,
+    step: 0.01,
+  }),
+  entry('holding.wallInset', 'Holding / Cascade', 'wall inset', 'reset', {
+    min: 0,
+    max: 0.4,
+    step: 0.01,
+  }),
+  entry('holding.guideForce', 'Holding / Cascade', 'holding guide force', 'live', {
+    min: 0,
+    max: 10,
+    step: 0.1,
+  }),
+  entry(
+    'holding.visibleOpacity',
+    'Holding / Cascade',
+    'zone opacity',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry(
+    'cascadeJudge.rogRiseFraction',
+    'Cascade 判据',
+    'RoG rise',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry('cascadeJudge.minPeakLag', 'Cascade 判据', 'min peak lag', 'live', {
+    min: 0,
+    max: 5,
+    step: 0.05,
+  }),
+  entry(
+    'cascadeJudge.maxDirectImpulseRatio',
+    'Cascade 判据',
+    'max direct impulse ratio',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry(
+    'cascadeJudge.attributionGain',
+    'Cascade 判据',
+    'attribution gain',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry(
+    'cascadeJudge.radialSpeedThreshold',
+    'Cascade 判据',
+    'radial speed threshold',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry(
+    'cascadeJudge.minAttributionSamples',
+    'Cascade 判据',
+    'min attribution samples',
+    'live',
+    { min: 1, max: 200, step: 1 }
+  ),
+  entry(
+    'cascadeJudge.minAverageNeighbors',
+    'Cascade 判据',
+    'min avg neighbors',
+    'live',
+    { min: 0, max: 30, step: 0.5 }
+  ),
+  entry(
+    'cascadeJudge.maxBaselineRogShortestSideFactor',
+    'Cascade 判据',
+    'baseline RoG / short side',
+    'live',
+    { min: 0.05, max: 1, step: 0.01 }
+  ),
+  entry(
+    'cascadeJudge.sampleInterval',
+    'Cascade 判据',
+    'sample interval',
+    'reset',
+    { min: 1 / 60, max: 1, step: 1 / 60 }
+  ),
+  entry('cascadeJudge.firstSeed', 'Cascade 判据', 'first seed', 'live', {
+    min: 1,
+    max: 999999,
+    step: 1,
+  }),
+  entry('cascadeJudge.lastSeed', 'Cascade 判据', 'last seed', 'live', {
+    min: 1,
+    max: 999999,
+    step: 1,
+  }),
+  entry('cascadeJudge.requiredPasses', 'Cascade 判据', 'required passes', 'live', {
+    min: 1,
+    max: 100,
+    step: 1,
+  }),
+  entry(
+    'cascadeJudge.batchStepsPerFrame',
+    'Advanced · Cascade',
+    'batch steps / frame',
+    'live',
+    { min: 1, max: 20, step: 1 }
+  ),
+  entry('spatialHash.enabled', 'Advanced · Spatial Hash', 'hash enabled', 'reset'),
+  entry('distanceField.enabled', '障碍距离场', 'distance field enabled', 'rebuildField'),
+  entry('distanceField.cellSize', '障碍距离场', 'field cell size', 'rebuildField', {
+    min: 0.02,
+    max: 0.2,
+    step: 0.005,
+  }),
+  entry(
+    'distanceField.paddingCells',
+    'Advanced · Distance Field',
+    'padding cells',
+    'rebuildField',
+    { min: 1, max: 4, step: 1 }
+  ),
+  entry(
+    'distanceField.analyticRefineDistance',
+    '障碍距离场',
+    'analytic refine distance',
+    'live',
+    { min: 0, max: 0.5, step: 0.005 }
+  ),
+  entry(
+    'distanceField.gradientEpsilon',
+    'Advanced · Distance Field',
+    'gradient epsilon',
+    'live',
+    { min: 0.005, max: 0.2, step: 0.005 }
+  ),
+  entry('obstacles.enabled', '障碍', 'map enabled', 'rebuildField'),
+  entry('physics.enabled', 'Rapier 物理', 'physics enabled', 'rebuildScene'),
+  entry('physics.spawnDefaults', 'Rapier 物理', 'spawn defaults', 'rebuildScene'),
+  entry('physics.gravityX', 'Rapier 物理', 'gravity X', 'live', {
+    min: -3,
+    max: 3,
+    step: 0.01,
+  }),
+  entry('physics.gravityY', 'Rapier 物理', 'gravity Y', 'live', {
+    min: -3,
+    max: 3,
+    step: 0.01,
+  }),
+  entry('physics.gravityZ', 'Rapier 物理', 'gravity Z', 'live', {
+    min: -3,
+    max: 3,
+    step: 0.01,
+  }),
+  entry('physics.linearDamping', 'Rapier 物理', 'linear damping', 'live', {
+    min: 0,
+    max: 10,
+    step: 0.05,
+  }),
+  entry('physics.angularDamping', 'Rapier 物理', 'angular damping', 'live', {
+    min: 0,
+    max: 10,
+    step: 0.05,
+  }),
+  entry('physics.restitution', 'Rapier 物理', 'restitution', 'rebuildScene', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('physics.density', 'Rapier 物理', 'density', 'rebuildScene', {
+    min: 0.01,
+    max: 10,
+    step: 0.01,
+  }),
+  entry('physics.fishImpulseStrength', 'Rapier 物理', 'fish impulse', 'live', {
+    min: 0,
+    max: 0.05,
+    step: 0.0001,
+  }),
+  entry('physics.fishImpulseLimit', 'Rapier 物理', 'impulse limit', 'live', {
+    min: 0,
+    max: 0.1,
+    step: 0.0001,
+  }),
+  entry('physics.interactionRadius', 'Rapier 物理', 'interaction radius', 'live', {
+    min: 0.005,
+    max: 0.3,
+    step: 0.005,
+  }),
+  entry('physics.aabbPadding', 'Rapier 物理', 'AABB padding', 'live', {
+    min: 0,
+    max: 0.5,
+    step: 0.005,
+  }),
+  entry('physics.dynamicRingRadius', 'Rapier 物理', 'ring radius', 'rebuildScene', {
+    min: 0.03,
+    max: 0.4,
+    step: 0.005,
+  }),
+  entry('physics.dynamicRingTube', 'Rapier 物理', 'ring tube', 'rebuildScene', {
+    min: 0.005,
+    max: 0.12,
+    step: 0.002,
+  }),
+  entry('physics.dynamicCubeSize', 'Rapier 物理', 'cube size', 'rebuildScene', {
+    min: 0.03,
+    max: 0.5,
+    step: 0.005,
+  }),
+  entry(
+    'physics.dynamicColumnRadius',
+    'Rapier 物理',
+    'column radius',
+    'rebuildScene',
+    { min: 0.01, max: 0.2, step: 0.002 }
+  ),
+  entry(
+    'physics.dynamicColumnHeight',
+    'Rapier 物理',
+    'column height',
+    'rebuildScene',
+    { min: 0.04, max: 0.6, step: 0.005 }
+  ),
+  entry('physics.dynamicBaseRadius', 'Rapier 物理', 'base radius', 'rebuildScene', {
+    min: 0.02,
+    max: 0.3,
+    step: 0.002,
+  }),
+  entry('physics.dynamicBaseHeight', 'Rapier 物理', 'base height', 'rebuildScene', {
+    min: 0.01,
+    max: 0.2,
+    step: 0.002,
+  }),
+  entry('camera.fov', '相机', 'FOV', 'live', {
+    min: 20,
+    max: 100,
+    step: 1,
+  }),
+  entry('camera.globalNear', 'Advanced · Camera', 'global near', 'live', {
+    min: 0.001,
+    max: 0.2,
+    step: 0.001,
+  }),
+  entry('camera.firstPersonNear', '相机', 'first-person near', 'live', {
+    min: 0.001,
+    max: 0.2,
+    step: 0.001,
+  }),
+  entry('camera.focusDistance', '相机', '聚焦跟随距离', 'live', {
+    min: 0.08,
+    max: 2,
+    step: 0.01,
+  }),
+  entry('camera.focusHeight', '相机', '聚焦高度', 'live', {
+    min: -0.5,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('camera.headOffset', '相机', 'head offset', 'live', {
+    min: 0,
+    max: 0.2,
+    step: 0.002,
+  }),
+  entry('camera.lookAhead', '相机', 'look ahead', 'live', {
+    min: 0.02,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('camera.positionDamping', '相机', 'position damping', 'live', {
+    min: 0.1,
+    max: 40,
+    step: 0.1,
+  }),
+  entry('camera.orientationDamping', '相机', 'orientation damping', 'live', {
+    min: 0.1,
+    max: 40,
+    step: 0.1,
+  }),
+  entry('camera.pointerSensitivity', '相机', 'pointer sensitivity', 'live', {
+    min: 0.0001,
+    max: 0.02,
+    step: 0.0001,
+  }),
+];
+
+function schoolEntries(config) {
+  return config.schools.flatMap((item, index) => {
+    const p = `schools.${index}`;
+    const group = `鱼群 · ${item.name}`;
+    return [
+      entry(`${p}.id`, group, 'id', 'rebuildScene'),
+      entry(`${p}.name`, group, 'name', 'rebuildScene'),
+      entry(`${p}.color`, group, 'color', 'live'),
+      entry(`${p}.count`, group, 'count', 'rebuildScene', {
+        min: 1,
+        max: 2000,
+        step: 1,
+      }),
+      entry(`${p}.size`, group, 'size', 'live', {
+        min: 0.2,
+        max: 5,
+        step: 0.01,
+      }),
+      entry(`${p}.targetNeighbors`, group, 'target neighbors', 'reset', {
+        min: 1,
+        max: 64,
+        step: 1,
+      }),
+      entry(`${p}.cruiseSpeed`, group, 'cruise speed', 'live', {
+        min: 0.01,
+        max: 2,
+        step: 0.01,
+      }),
+      entry(`${p}.maxSpeed`, group, 'max speed', 'live', {
+        min: 0.01,
+        max: 3,
+        step: 0.01,
+      }),
+      entry(`${p}.turnSpeed`, group, 'turn speed', 'live', {
+        min: 0.1,
+        max: 12,
+        step: 0.1,
+      }),
+      entry(`${p}.separationWeight`, group, 'separation weight', 'live', {
+        min: 0,
+        max: 6,
+        step: 0.05,
+      }),
+      entry(`${p}.alignmentWeight`, group, 'alignment weight', 'live', {
+        min: 0,
+        max: 6,
+        step: 0.05,
+      }),
+      entry(`${p}.cohesionWeight`, group, 'cohesion weight', 'live', {
+        min: 0,
+        max: 6,
+        step: 0.05,
+      }),
+      ...['centerX', 'centerY', 'centerZ'].map((axis) =>
+        entry(`${p}.spawnRegion.${axis}`, group, `spawn ${axis}`, 'reset', {
+          min: -0.5,
+          max: 0.5,
+          step: 0.01,
+        })
+      ),
+      entry(`${p}.spawnRegion.radius`, group, 'spawn radius', 'reset', {
+        min: 0.02,
+        max: 1.5,
+        step: 0.01,
+      }),
+      ...['x', 'y', 'z'].map((axis) =>
+        entry(`${p}.initialHeading.${axis}`, group, `heading ${axis}`, 'reset', {
+          min: -1,
+          max: 1,
+          step: 0.05,
+        })
+      ),
+    ];
+  });
+}
+
+function obstacleEntries(config) {
+  const result = [];
+  for (const [key, obstacle] of Object.entries(config.obstacles)) {
+    if (key === 'enabled') continue;
+    const group = `障碍 · ${key}`;
+    for (const [field, value] of Object.entries(obstacle)) {
+      const path = `obstacles.${key}.${field}`;
+      if (field === 'type') {
+        result.push(
+          entry(path, group, 'type', 'rebuildField', {
+            options: { Ring: 'ring', Box: 'box' },
+          })
+        );
+      } else if (typeof value === 'boolean') {
+        result.push(entry(path, group, field, 'rebuildField'));
+      } else {
+        const rotation = field.startsWith('rotation');
+        const dimension = [
+          'width',
+          'height',
+          'depth',
+          'thickness',
+          'holeDiameter',
+          'frameDepth',
+        ].includes(field);
+        result.push(
+          entry(path, group, field, 'rebuildField', {
+            min: rotation ? -Math.PI : dimension ? 0.01 : -3,
+            max: rotation ? Math.PI : 3,
+            step: rotation ? TAU / 360 : 0.01,
+          })
+        );
+      }
+    }
+  }
+  return result;
+}
+
+function physicsSpawnEntries() {
+  const result = [];
+  for (const kind of ['ring', 'cube', 'column']) {
+    for (const axis of ['X', 'Y', 'Z']) {
+      result.push(
+        entry(
+          `physics.${kind}Spawn${axis}`,
+          'Advanced · Physics Spawn',
+          `${kind} spawn ${axis}`,
+          'rebuildScene',
+          { min: -3, max: 3, step: 0.01 }
+        )
+      );
+    }
+  }
+  return result;
+}
+
+export function createParameterRegistry(config = createDefaultConfig()) {
+  return [
+    ...scalarEntries,
+    ...schoolEntries(config),
+    ...obstacleEntries(config),
+    ...physicsSpawnEntries(),
+  ];
+}
+
+export function getPath(root, path) {
+  return path.split('.').reduce((value, key) => value?.[key], root);
+}
+
+export function setPath(root, path, value) {
+  const keys = path.split('.');
+  const leaf = keys.pop();
+  const parent = keys.reduce((object, key) => object[key], root);
+  parent[leaf] = value;
+}
+
+export function listLeafPaths(value, prefix = '') {
+  if (value === null || typeof value !== 'object') return [prefix];
+  const paths = [];
+  for (const [key, child] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    paths.push(...listLeafPaths(child, path));
+  }
+  return paths;
+}
+
+export function validateConfig(candidate) {
+  const errors = [];
+  const warnings = [];
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return { valid: false, errors: ['配置必须是对象'], warnings };
+  }
+  if (!Array.isArray(candidate.schools) || candidate.schools.length < 2) {
+    errors.push('至少需要两个鱼群');
+    return { valid: false, errors, warnings };
+  }
+  let registry;
+  try {
+    registry = createParameterRegistry(candidate);
+  } catch {
+    errors.push('配置结构不完整');
+    return { valid: false, errors, warnings };
+  }
+  const registered = new Set(registry.map((item) => item.path));
+  for (const path of listLeafPaths(candidate)) {
+    if (!registered.has(path)) errors.push(`未注册参数: ${path}`);
+  }
+  for (const spec of registry) {
+    const value = getPath(candidate, spec.path);
+    if (value === undefined) {
+      errors.push(`缺少参数: ${spec.path}`);
+      continue;
+    }
+    if (spec.options && !Object.values(spec.options).includes(value)) {
+      errors.push(`${spec.path} 不是允许值`);
+    }
+    if (spec.min !== undefined) {
+      if (!Number.isFinite(value)) errors.push(`${spec.path} 必须是有限数`);
+      if (value < spec.min || value > spec.max) {
+        errors.push(`${spec.path} 超出 ${spec.min}–${spec.max}`);
+      }
+      if (spec.step === 1 && !Number.isInteger(value)) {
+        errors.push(`${spec.path} 必须是整数`);
+      }
+    }
+  }
+  const ids = candidate.schools?.map((item) => item.id) ?? [];
+  if (new Set(ids).size !== ids.length) errors.push('鱼群 id 必须唯一');
+  if (candidate.relations?.KMax <= candidate.relations?.k) {
+    errors.push('relations.KMax 必须大于 relations.k');
+  }
+  for (const school of candidate.schools) {
+    if (school.maxSpeed < school.cruiseSpeed) {
+      errors.push(`${school.id}: maxSpeed 必须不小于 cruiseSpeed`);
+    }
+    const headingLength = Math.hypot(
+      school.initialHeading.x,
+      school.initialHeading.y,
+      school.initialHeading.z
+    );
+    if (headingLength <= 1e-8) {
+      errors.push(`${school.id}: initialHeading 不能为零向量`);
+    }
+  }
+  if (!ids.includes(candidate.holding.schoolId)) {
+    errors.push('holding.schoolId 必须引用现有鱼群');
+  }
+  for (const [id, obstacle] of Object.entries(candidate.obstacles)) {
+    if (id === 'enabled' || obstacle.type !== 'ring') continue;
+    if (
+      obstacle.holeDiameter >= obstacle.width ||
+      obstacle.holeDiameter >= obstacle.height
+    ) {
+      errors.push(`${id}: holeDiameter 必须小于面板宽高`);
+    }
+  }
+  if (
+    candidate.respawn.edgeBand >=
+    Math.min(
+      candidate.tank.width,
+      candidate.tank.height,
+      candidate.tank.depth
+    ) /
+      2
+  ) {
+    errors.push('respawn.edgeBand 必须小于缸最短边的一半');
+  }
+  if (
+    candidate.locomotion?.burstFactor <=
+    candidate.locomotion?.panicSpeedFactor
+  ) {
+    warnings.push('burstFactor ≤ panicSpeedFactor：捕食者可能无法闭合距离');
+  }
+  if (
+    candidate.cascadeJudge?.lastSeed <
+    candidate.cascadeJudge?.firstSeed
+  ) {
+    errors.push('lastSeed 必须不小于 firstSeed');
+  }
+  const batchCount =
+    candidate.cascadeJudge?.lastSeed -
+    candidate.cascadeJudge?.firstSeed +
+    1;
+  if (candidate.cascadeJudge?.requiredPasses > batchCount) {
+    errors.push('requiredPasses 不能大于 seed 数量');
+  }
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+export function exportConfigJson(config) {
+  return JSON.stringify(config, null, 2);
+}
+
+export function importConfigJson(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`JSON 解析失败: ${error.message}`);
+  }
+  const result = validateConfig(parsed);
+  if (!result.valid) throw new Error(result.errors.join('\n'));
+  return { config: deepClone(parsed), warnings: result.warnings };
+}

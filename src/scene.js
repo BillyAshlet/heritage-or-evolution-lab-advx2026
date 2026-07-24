@@ -400,7 +400,10 @@ export function createScene(wrapper, getRotation = () => 0) {
         controls.autoRotate = cameraSettings.autoRotate;
         controls.autoRotateSpeed = cameraSettings.autoRotateSpeed;
         controls.dampingFactor = cameraSettings.damping;
-        controls.update();
+        // A selected fish or first-person view owns the camera transform.
+        // OrbitControls.update() still rewrites the camera while input is
+        // disabled, so it must not run until ownership returns to orbit mode.
+        if (controls.enabled) controls.update();
       }
     },
     home,

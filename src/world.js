@@ -31,7 +31,7 @@ export function notifyTankChange() {
 
 export const GRAVITY = 9.81;
 
-const FIXED_DT = 1 / 60;
+const DEFAULT_FIXED_DT = 1 / 60;
 const BASE_MAX_CATCHUP_STEPS = 5; // after a tab-switch, don't replay the whole gap
 const MAX_CATCHUP_STEPS_CAP = 48; // hard ceiling so 4× speed cannot melt a phone
 
@@ -44,6 +44,7 @@ export class World {
     // Simulation speed multiplies real elapsed time before the fixed-step
     // integrator. 1 = realtime, 2 = twice as many 1/60 s physics steps.
     this.timeScale = 1;
+    this.fixedDt = DEFAULT_FIXED_DT;
     this._accumulator = 0;
     this._lastMs = null;
   }
@@ -63,6 +64,10 @@ export class World {
     this.timeScale = scale;
     if (scale <= 0) return;
 
+    const fixedDt = Number.isFinite(this.fixedDt)
+      ? Math.min(1 / 20, Math.max(1 / 240, this.fixedDt))
+      : DEFAULT_FIXED_DT;
+    this.fixedDt = fixedDt;
     const simElapsed = realElapsed * scale;
     const maxCatchupSteps = Math.min(
       MAX_CATCHUP_STEPS_CAP,
@@ -70,11 +75,11 @@ export class World {
     );
     this._accumulator = Math.min(
       this._accumulator + simElapsed,
-      maxCatchupSteps * FIXED_DT
+      maxCatchupSteps * fixedDt
     );
-    while (this._accumulator >= FIXED_DT) {
-      for (const system of this.systems) system.step(FIXED_DT);
-      this._accumulator -= FIXED_DT;
+    while (this._accumulator >= fixedDt) {
+      for (const system of this.systems) system.step(fixedDt);
+      this._accumulator -= fixedDt;
     }
   }
 }

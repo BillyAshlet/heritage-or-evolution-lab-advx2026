@@ -11,6 +11,7 @@
     "preview": "vite preview --host"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "0.19.3",
     "three": "^0.178.0",
     "tweakpane": "^4.0.5"
   },
