@@ -3,5 +3,8 @@ dist/
 .DS_Store
 *.local
 build/
-godot/.godot/
-godot/android/
+REQUIREMENTS-experiment.md
+赛道信息.md
+docs/
+test/
+godot/
