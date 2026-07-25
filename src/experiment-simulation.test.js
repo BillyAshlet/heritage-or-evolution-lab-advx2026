@@ -226,6 +226,11 @@ test('ecology starvation is real death and sole survivor is terminal', () => {
   simulation._updateEcology(1);
   assert.equal(simulation.alive[0], 0);
   assert.equal(simulation.deathCounts[0].starved, 1);
+  if (simulation.captureVfx) {
+    assert.ok(
+      simulation.captureVfx.particles.some((p) => p.style === 'starvation')
+    );
+  }
 
   for (let schoolIndex = 1; schoolIndex < 3; schoolIndex += 1) {
     const range = simulation.schoolRanges[schoolIndex];

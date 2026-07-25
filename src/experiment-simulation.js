@@ -144,7 +144,8 @@ export class ExperimentSimulation {
     if (this.scene?.add) {
       this.captureVfx = new CaptureVfx(
         this.scene,
-        this.config.captureVfx
+        this.config.captureVfx,
+        this.config.starvationVfx
       );
     }
     this._buildMesh();
@@ -363,7 +364,10 @@ export class ExperimentSimulation {
 
   setConfig(config, mode = 'live') {
     this.config = config;
-    if (this.captureVfx) this.captureVfx.params = config.captureVfx;
+    if (this.captureVfx) {
+      this.captureVfx.params = config.captureVfx;
+      this.captureVfx.starvationParams = config.starvationVfx;
+    }
     this.derived = deriveExperiment(config);
     this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
     this.relationMatrix = this.relations.update(
@@ -982,11 +986,7 @@ export class ExperimentSimulation {
           this.positions[offset + 1],
           this.positions[offset + 2]
         );
-        this.captureVfx?.emit(
-          position,
-          new THREE.Vector3(0, 0, 0),
-          position
-        );
+        this.captureVfx?.emitStarvation(position);
       }
     }
     return true;

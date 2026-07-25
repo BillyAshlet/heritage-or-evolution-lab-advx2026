@@ -46,13 +46,26 @@ function fibonacciDirection(index, count, out) {
  * a transparent billboard ring whose brightness falls off as
  * (1 - r/R) * exp(-k r/R).
  */
+export const DEFAULT_STARVATION_VFX = Object.freeze({
+  particleCount: 10,
+  density: 1.6,
+  spawnRadius: 0.05,
+  spawnInterval: 0.03,
+  lifetime: 2.4,
+  cubeSize: 0.02,
+  cubeColor: '#6f7d52',
+  radialSpeed: 0.035,
+  gravity: -0.05,
+});
+
 export class CaptureVfx {
-  constructor(scene, params = CAPTURE_FX_PARAMS) {
+  constructor(scene, params = CAPTURE_FX_PARAMS, starvationParams = DEFAULT_STARVATION_VFX) {
     if (!scene?.add) {
       throw new TypeError('CaptureVfx requires a Three.js Scene');
     }
     this.scene = scene;
     this.params = params;
+    this.starvationParams = starvationParams || DEFAULT_STARVATION_VFX;
     this.particles = [];
     this.glows = [];
     this._nextBurstId = 1;
@@ -86,8 +99,8 @@ export class CaptureVfx {
     scene.add(this.glowMesh);
   }
 
-  _desiredCount() {
-    const P = this.params;
+  _desiredCount(params = this.params) {
+    const P = params;
     const density = nonNegative(P.density, 1);
     const radius = Math.max(nonNegative(P.spawnRadius, 0.04), 0.01);
     // Area of a unit-ish shell around the bite. Density 1 ≈ previous look.
@@ -141,17 +154,69 @@ export class CaptureVfx {
 
       this.particles.push({
         burstId,
+        style: 'capture',
         origin: position
           .clone()
           .addScaledVector(_radial, spawnRadius * (0.35 + 0.65 * ((i % 5) / 4))),
         initialVelocity: _initialVelocity.clone(),
+        gravityY: 0,
         age: -i * interval,
         lifetime,
         size,
+        color: P.cubeColor || '#1e4f8c',
       });
     }
 
     this._emitGlow(glowCenter || position);
+    this._writeMatrices();
+    return count;
+  }
+
+  emitStarvation(position) {
+    const P = this.starvationParams || DEFAULT_STARVATION_VFX;
+    if (!position) return 0;
+
+    const count = this._desiredCount(P);
+    const interval = nonNegative(P.spawnInterval, 0.03);
+    const lifetime = nonNegative(P.lifetime, 2.4);
+    const size = nonNegative(P.cubeSize, 0.02);
+    const spawnRadius = nonNegative(P.spawnRadius, 0.05);
+    const radialSpeed = nonNegative(P.radialSpeed, 0.035);
+    const gravity = finiteOr(P.gravity, -0.05);
+    if (count === 0 || lifetime <= EPSILON || size <= EPSILON) return 0;
+
+    while (this.particles.length + count > MAX_PARTICLES) {
+      const oldestBurstId = this.particles[0]?.burstId;
+      if (oldestBurstId === undefined) break;
+      let removeCount = 0;
+      while (
+        removeCount < this.particles.length &&
+        this.particles[removeCount].burstId === oldestBurstId
+      ) {
+        removeCount++;
+      }
+      this.particles.splice(0, removeCount);
+    }
+
+    const burstId = this._nextBurstId++;
+    for (let i = 0; i < count; i++) {
+      fibonacciDirection(i, count, _radial);
+      _initialVelocity.copy(_radial).multiplyScalar(radialSpeed);
+      this.particles.push({
+        burstId,
+        style: 'starvation',
+        origin: position
+          .clone()
+          .addScaledVector(_radial, spawnRadius * (0.35 + 0.65 * ((i % 5) / 4))),
+        initialVelocity: _initialVelocity.clone(),
+        gravityY: gravity,
+        age: -i * interval,
+        lifetime,
+        size,
+        color: P.cubeColor || '#6f7d52',
+      });
+    }
+
     this._writeMatrices();
     return count;
   }
@@ -233,11 +298,19 @@ export class CaptureVfx {
 
       const age = Math.min(particle.age, particle.lifetime);
       const speedRatio = Math.max(0, 1 - age / particle.lifetime);
-      // Integral of v0(1 - t/L): displacement = v0(t - t²/(2L)).
-      const displacement = age - (age * age) / (2 * particle.lifetime);
-      _position
-        .copy(particle.origin)
-        .addScaledVector(particle.initialVelocity, displacement);
+      if (particle.style === 'starvation') {
+        // Constant vertical acceleration: x = x0 + v0 t + 1/2 a t^2.
+        _position
+          .copy(particle.origin)
+          .addScaledVector(particle.initialVelocity, age);
+        _position.y += 0.5 * finiteOr(particle.gravityY, -0.05) * age * age;
+      } else {
+        // Integral of v0(1 - t/L): displacement = v0(t - t²/(2L)).
+        const displacement = age - (age * age) / (2 * particle.lifetime);
+        _position
+          .copy(particle.origin)
+          .addScaledVector(particle.initialVelocity, displacement);
+      }
       _scale.setScalar(particle.size * speedRatio);
       _matrix.makeScale(_scale.x, _scale.y, _scale.z);
       _matrix.setPosition(_position);
