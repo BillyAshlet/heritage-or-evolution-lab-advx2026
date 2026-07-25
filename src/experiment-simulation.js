@@ -709,9 +709,22 @@ export class ExperimentSimulation {
     return force;
   }
 
+  _energyRatio(index) {
+    const capacity = Math.max(EPSILON, this.config.ecology.energyCapacity);
+    return this.energy[index] / capacity;
+  }
+
+  _canBurst(index) {
+    if (!this.config.ecology?.enabled) return true;
+    const minRatio = Number.isFinite(this.config.ecology.minBurstEnergyRatio)
+      ? this.config.ecology.minBurstEnergyRatio
+      : 1 / 3;
+    return this._energyRatio(index) >= minRatio;
+  }
+
   _movementState(index, target, threatened) {
     const state =
-      target >= 0 && this.alive[target]
+      target >= 0 && this.alive[target] && this._canBurst(index)
         ? 'burst'
         : threatened
           ? 'evade'
@@ -798,7 +811,7 @@ export class ExperimentSimulation {
     }
 
     const target = this.pursuitTargets[index];
-    if (target >= 0 && this.alive[target]) {
+    if (target >= 0 && this.alive[target] && this._canBurst(index)) {
       const targetOffset = target * 3;
       const distance = Math.sqrt(this.targetDistance2[index]);
       const lookAhead = Math.min(

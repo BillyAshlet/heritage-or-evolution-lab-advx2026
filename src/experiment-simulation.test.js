@@ -265,3 +265,27 @@ test('aquarium stamina drains without ecology winner freeze', () => {
   simulation._advance(1 / 60);
   assert.ok(simulation.elapsed > elapsed);
 });
+
+
+test('low energy blocks burst sprint', () => {
+  const simulation = smallSimulation('steady');
+  simulation.config.ecology.enabled = true;
+  simulation.config.ecology.minBurstEnergyRatio = 1 / 3;
+  const predator = simulation.schoolRanges[1].start;
+  const prey = 0;
+  simulation.pursuitTargets[predator] = prey;
+  simulation.energy[predator] =
+    simulation.config.ecology.energyCapacity * 0.2;
+  assert.equal(simulation._canBurst(predator), false);
+  assert.equal(
+    simulation._movementState(predator, prey, false),
+    'cruise'
+  );
+  simulation.energy[predator] =
+    simulation.config.ecology.energyCapacity * 0.5;
+  assert.equal(simulation._canBurst(predator), true);
+  assert.equal(
+    simulation._movementState(predator, prey, false),
+    'burst'
+  );
+});

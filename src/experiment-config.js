@@ -126,16 +126,17 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
   },
   ecology: {
     enabled: true,
-    energyCapacity: 1,
+    energyCapacity: 2 / 3,
     initialEnergyRatio: 0.82,
     basalRate: 0.02,
     basalSizeExponent: 0.75,
     burstMetabolicRate: 0.035,
     captureEnergyPerSize: 1,
     starvationVfxEnabled: true,
+    minBurstEnergyRatio: 1 / 3,
   },
   plankton: {
-    enabled: true,
+    enabled: false,
     capacity: 600,
     initialFraction: 0.8,
     growthRate: 0.12,
@@ -630,6 +631,13 @@ const scalarEntries = [
     '生态能量',
     'starvation effect',
     'live'
+  ),
+  entry(
+    'ecology.minBurstEnergyRatio',
+    '生态能量',
+    'min energy to burst',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
   ),
   entry('plankton.enabled', '浮游资源', 'plankton enabled', 'live'),
   entry('plankton.capacity', '浮游资源', 'carrying capacity', 'reset', {

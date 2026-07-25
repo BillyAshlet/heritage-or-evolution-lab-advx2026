@@ -71,7 +71,7 @@ function applyProjectPreset(stage) {
     stage.runtime.mode = 'steady';
     stage.traits.enabled = false;
     stage.ecology.enabled = true;
-    stage.plankton.enabled = true;
+    stage.plankton.enabled = false;
     restoreDefaultSchoolLayout(stage);
   } else if (stage.runtime.project === 'obstacle') {
     Object.assign(stage.tank, { width: 2, height: 1.2, depth: 0.8 });
@@ -104,7 +104,7 @@ function applyProjectPreset(stage) {
     stage.runtime.mode = 'ecology';
     stage.traits.enabled = true;
     stage.ecology.enabled = true;
-    stage.plankton.enabled = true;
+    stage.plankton.enabled = false;
     restoreDefaultSchoolLayout(stage);
   }
 }

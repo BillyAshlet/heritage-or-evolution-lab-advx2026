@@ -53,7 +53,9 @@ test('default project is the live size-derived aquarium', () => {
   assert.equal(config.runtime.project, 'aquarium');
   assert.equal(config.runtime.mode, 'steady');
   assert.equal(config.ecology.enabled, true);
-  assert.equal(config.plankton.enabled, true);
+  assert.equal(config.plankton.enabled, false);
+  assert.ok(Math.abs(config.ecology.energyCapacity - 2 / 3) < 1e-12);
+  assert.equal(config.ecology.minBurstEnergyRatio, 1 / 3);
   assert.deepEqual(projectOptions, ['aquarium', 'obstacle', 'ecology']);
   assert.deepEqual(modeOptions, ['steady', 'ecology']);
   assert.equal('policy' in config.relations, false);
