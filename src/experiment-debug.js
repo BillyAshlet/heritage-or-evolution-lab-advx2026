@@ -102,8 +102,6 @@ export const SCHOOL_SECTIONS = [
     expanded: false,
     fields: ['targetNeighbors', 'cohesionWeight'],
     derivedRadius: 'cohesionRadius',
-    globalPaths: ['perception.globalCohesionFactor'],
-    globalAfterFields: true,
   },
   {
     title: '出生布局',

@@ -747,24 +747,6 @@ export class ExperimentSimulation {
           this.positions[offset + 2]) *
         school.cohesionWeight;
     }
-    const schoolCenterOffset = schoolIndex * 3;
-    if (this.schoolAliveCounts[schoolIndex] > 1) {
-      const globalWeight =
-        school.cohesionWeight *
-        this.config.perception.globalCohesionFactor;
-      fx +=
-        (this.schoolCenters[schoolCenterOffset] -
-          this.positions[offset]) *
-        globalWeight;
-      fy +=
-        (this.schoolCenters[schoolCenterOffset + 1] -
-          this.positions[offset + 1]) *
-        globalWeight;
-      fz +=
-        (this.schoolCenters[schoolCenterOffset + 2] -
-          this.positions[offset + 2]) *
-        globalWeight;
-    }
     if (alignmentCount > 0) {
       fx +=
         (this.alignmentSums[offset] / alignmentCount -

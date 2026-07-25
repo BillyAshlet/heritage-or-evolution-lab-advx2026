@@ -62,19 +62,15 @@ test('boid editor keeps each radius control beside its school weight', () => {
     'targetNeighbors',
     'cohesionWeight',
   ]);
-  assert.deepEqual(sections['凝聚 · Cohesion'].globalPaths, [
-    'perception.globalCohesionFactor',
-  ]);
+  assert.equal(sections['凝聚 · Cohesion'].globalPaths, undefined);
   assert.equal(
     sections['凝聚 · Cohesion'].derivedRadius,
     'cohesionRadius'
   );
-  assert.equal(sections['凝聚 · Cohesion'].globalAfterFields, true);
   assert.deepEqual(
     [...SCHOOL_EMBEDDED_GLOBAL_PATHS].sort(),
     [
       'perception.alignmentRadiusFactor',
-      'perception.globalCohesionFactor',
       'perception.separationRadiusFactor',
     ].sort()
   );

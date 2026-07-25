@@ -104,8 +104,8 @@ actorSize / targetSize ≤ 1/k → evade
 `wallMargin` 是鱼心的硬边界内缩，并参与缸壁 collider 厚度；`edgeSoftness`
 是到缸壁或静态障碍的软转向带，距离越近斥力越强。`crossSeparationScale`
 只控制不同鱼群之间按较大体型缩放的连续斥力半径，不参与捕食关系判断。
-`globalCohesionFactor` 乘以当前鱼群的 cohesion weight，把个体拉向实时
-全群群心，作为局部凝聚看不到邻居时的防走失兜底；数值过大会压制分裂。
+同群 cohesion 只作用于动态 `cohesionRadius` 内的局部同群邻居；局部没有
+邻居时不再施加指向实时全群群心的隐藏兜底力。
 
 ### Predation Mode
 

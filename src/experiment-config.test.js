@@ -57,6 +57,7 @@ test('default project is the live size-derived aquarium', () => {
   assert.equal('policy' in config.relations, false);
   assert.equal('holding' in config, false);
   assert.equal('cascadeJudge' in config, false);
+  assert.equal('globalCohesionFactor' in config.perception, false);
   assert.equal('staminaDrainRate' in config.traits, false);
   assert.equal('stalkSpeedFactor' in config.traits, false);
   assert.equal(config.relations.burstRadiusFactor < 1, true);
@@ -74,6 +75,15 @@ test('removed cascade project fails closed during config import', () => {
   assert.throws(
     () => importConfigJson(exportConfigJson(legacy)),
     /runtime\.(project|mode) 不是允许值/
+  );
+});
+
+test('removed global cohesion fails closed during config import', () => {
+  const legacy = createDefaultConfig();
+  legacy.perception.globalCohesionFactor = 0.35;
+  assert.throws(
+    () => importConfigJson(exportConfigJson(legacy)),
+    /未注册参数: perception\.globalCohesionFactor/
   );
 });
 

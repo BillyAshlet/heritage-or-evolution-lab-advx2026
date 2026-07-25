@@ -93,7 +93,6 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     separationRadiusFactor: 0.4,
     detectionLengthFactor: 0.75,
     crossSeparationScale: 0.15,
-    globalCohesionFactor: 0.35,
   },
   relations: {
     k: 1.35,
@@ -430,13 +429,6 @@ const scalarEntries = [
     'cross separation radius / size',
     'live',
     { min: 0.02, max: 0.5, step: 0.01 }
-  ),
-  entry(
-    'perception.globalCohesionFactor',
-    '感知',
-    'global fallback ×（全局）',
-    'live',
-    { min: 0, max: 2, step: 0.01 }
   ),
   entry('relations.k', '关系', '捕食体型阈值 k', 'live', {
     min: 1.01,
