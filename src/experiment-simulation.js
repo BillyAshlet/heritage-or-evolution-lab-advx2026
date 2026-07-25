@@ -999,7 +999,9 @@ export class ExperimentSimulation {
           this.positions[offset + 1],
           this.positions[offset + 2]
         );
-        this.captureVfx?.emitStarvation(position);
+        const floorY =
+          -this.config.tank.height / 2 + this.config.tank.wallMargin;
+        this.captureVfx?.emitStarvation(position, { floorY });
       }
     }
     return true;

@@ -185,11 +185,11 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     density: 1.6,
     spawnRadius: 0.05,
     spawnInterval: 0.03,
-    lifetime: 2.4,
     cubeSize: 0.02,
     cubeColor: '#6f7d52',
     radialSpeed: 0.035,
     gravity: -0.05,
+    persist: true,
   },
   spatialHash: {
     enabled: true,
@@ -822,17 +822,13 @@ const scalarEntries = [
     max: 0.2,
     step: 0.002,
   }),
-  entry('starvationVfx.lifetime', '耐力死亡特效', '碎片寿命', 'live', {
-    min: 0.2,
-    max: 6,
-    step: 0.05,
-  }),
   entry('starvationVfx.cubeSize', '耐力死亡特效', '碎片尺寸', 'live', {
     min: 0.002,
     max: 0.08,
     step: 0.001,
   }),
   entry('starvationVfx.cubeColor', '耐力死亡特效', '碎片颜色', 'live'),
+  entry('starvationVfx.persist', '耐力死亡特效', '尸体不消失', 'live'),
   entry('starvationVfx.radialSpeed', '耐力死亡特效', '初始散射速度', 'live', {
     min: 0,
     max: 0.5,

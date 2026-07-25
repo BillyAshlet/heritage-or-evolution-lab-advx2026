@@ -51,11 +51,12 @@ export const DEFAULT_STARVATION_VFX = Object.freeze({
   density: 1.6,
   spawnRadius: 0.05,
   spawnInterval: 0.03,
-  lifetime: 2.4,
   cubeSize: 0.02,
   cubeColor: '#6f7d52',
   radialSpeed: 0.035,
   gravity: -0.05,
+  // Starvation debris never fades out; it only settles under gravity.
+  persist: true,
 });
 
 export class CaptureVfx {
@@ -172,18 +173,22 @@ export class CaptureVfx {
     return count;
   }
 
-  emitStarvation(position) {
+  emitStarvation(position, options = {}) {
     const P = this.starvationParams || DEFAULT_STARVATION_VFX;
     if (!position) return 0;
 
     const count = this._desiredCount(P);
     const interval = nonNegative(P.spawnInterval, 0.03);
-    const lifetime = nonNegative(P.lifetime, 2.4);
     const size = nonNegative(P.cubeSize, 0.02);
     const spawnRadius = nonNegative(P.spawnRadius, 0.05);
     const radialSpeed = nonNegative(P.radialSpeed, 0.035);
     const gravity = finiteOr(P.gravity, -0.05);
-    if (count === 0 || lifetime <= EPSILON || size <= EPSILON) return 0;
+    const floorY = Number.isFinite(options.floorY)
+      ? options.floorY
+      : Number.isFinite(P.floorY)
+        ? P.floorY
+        : -Infinity;
+    if (count === 0 || size <= EPSILON) return 0;
 
     while (this.particles.length + count > MAX_PARTICLES) {
       const oldestBurstId = this.particles[0]?.burstId;
@@ -210,8 +215,11 @@ export class CaptureVfx {
           .addScaledVector(_radial, spawnRadius * (0.35 + 0.65 * ((i % 5) / 4))),
         initialVelocity: _initialVelocity.clone(),
         gravityY: gravity,
+        floorY,
         age: -i * interval,
-        lifetime,
+        // Persistent corpse debris: no lifetime cull and no size fade.
+        lifetime: Infinity,
+        persist: true,
         size,
         color: P.cubeColor || '#6f7d52',
       });
@@ -263,7 +271,9 @@ export class CaptureVfx {
       for (let readIndex = 0; readIndex < this.particles.length; readIndex++) {
         const particle = this.particles[readIndex];
         particle.age += dt;
-        if (particle.age <= particle.lifetime) {
+        // Capture debris still expires. Starvation corpses persist and only
+        // leave when capacity eviction removes the oldest burst.
+        if (particle.persist || particle.age <= particle.lifetime) {
           this.particles[writeIndex++] = particle;
         }
       }
@@ -296,22 +306,27 @@ export class CaptureVfx {
         continue;
       }
 
-      const age = Math.min(particle.age, particle.lifetime);
-      const speedRatio = Math.max(0, 1 - age / particle.lifetime);
-      if (particle.style === 'starvation') {
-        // Constant vertical acceleration: x = x0 + v0 t + 1/2 a t^2.
+      if (particle.style === 'starvation' || particle.persist) {
+        // Natural corpse sink: x = x0 + v0 t + 1/2 a t^2. No lifetime fade.
+        const age = Math.max(0, particle.age);
         _position
           .copy(particle.origin)
           .addScaledVector(particle.initialVelocity, age);
         _position.y += 0.5 * finiteOr(particle.gravityY, -0.05) * age * age;
+        if (Number.isFinite(particle.floorY)) {
+          _position.y = Math.max(particle.floorY, _position.y);
+        }
+        _scale.setScalar(particle.size);
       } else {
+        const age = Math.min(particle.age, particle.lifetime);
+        const speedRatio = Math.max(0, 1 - age / Math.max(particle.lifetime, EPSILON));
         // Integral of v0(1 - t/L): displacement = v0(t - t²/(2L)).
         const displacement = age - (age * age) / (2 * particle.lifetime);
         _position
           .copy(particle.origin)
           .addScaledVector(particle.initialVelocity, displacement);
+        _scale.setScalar(particle.size * speedRatio);
       }
-      _scale.setScalar(particle.size * speedRatio);
       _matrix.makeScale(_scale.x, _scale.y, _scale.z);
       _matrix.setPosition(_position);
       this.mesh.setMatrixAt(i, _matrix);
