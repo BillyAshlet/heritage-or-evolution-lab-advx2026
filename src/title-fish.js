@@ -5,12 +5,12 @@ const ALIGNMENT_RADIUS = 150;
 const COHESION_RADIUS = 150;
 const SEPARATION_RADIUS = 38;
 const MIN_SPEED = 22;
-const MAX_SPEED = 220;
+const MAX_SPEED = 700;
 const ALIGNMENT_STRENGTH = 0.42;
-const COHESION_STRENGTH = 0.16;
-const POINTER_COHESION_BASE = 80;
-const POINTER_COHESION_PEAK = 1000;
-const MAX_ACCELERATION = 1200;
+const COHESION_STRENGTH = 0.035;
+const POINTER_COHESION_BASE = 160;
+const POINTER_COHESION_PEAK = 3200;
+const MAX_ACCELERATION = 10000;
 const BOUNDARY_MARGIN = 92;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
@@ -35,7 +35,7 @@ function clampMagnitude(x, y, max) {
 class TitleFishSchool {
   constructor(canvas, {
     count = FISH_COUNT,
-    cohesionRadius = 320,
+    cohesionRadius = 720,
   } = {}) {
     this.canvas = canvas;
     this.count = count;
