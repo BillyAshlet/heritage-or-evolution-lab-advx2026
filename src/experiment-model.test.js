@@ -26,10 +26,13 @@ test('default aquarium is doubled and dynamic radii follow its density', () => {
   const derived = deriveExperiment(config);
   assert.ok(Math.abs(derived.schools[0].neighborRadius - 0.628) < 0.002);
   assert.ok(Math.abs(derived.schools[1].neighborRadius - 0.791) < 0.002);
-  assert.ok(Math.abs(derived.schools[2].neighborRadius - 0.853) < 0.002);
-  assert.ok(Math.abs(derived.schools[0].detectionLength - 0.2826) < 0.002);
-  assert.ok(Math.abs(derived.schools[1].detectionLength - 0.3560) < 0.002);
-  assert.ok(Math.abs(derived.schools[2].detectionLength - 0.3837) < 0.002);
+  // 大群改为 count 80 / targetNeighbors 5：原来 n=2 算出的 cohesionRadius
+  // (0.853) 小于全缸随机出生时的平均间距 (1.090)，它从第一帧就感知不到同伴。
+  assert.ok(Math.abs(derived.schools[2].neighborRadius - 0.918) < 0.002);
+  // detectionLengthFactor is aligned to classic boids (~0.511 of neighbor radius).
+  assert.ok(Math.abs(derived.schools[0].detectionLength - 0.3208) < 0.002);
+  assert.ok(Math.abs(derived.schools[1].detectionLength - 0.4042) < 0.002);
+  assert.ok(Math.abs(derived.schools[2].detectionLength - 0.4691) < 0.002);
   assert.equal(
     derived.schools[0].panicRadius,
     derived.schools[0].detectionLength
@@ -77,8 +80,12 @@ test('main project derives predator and prey roles from live body size', () => {
   const [small, medium, large] = config.schools;
   assert.equal(relationBetween(medium, small, config.relations), 'pursuit');
   assert.equal(relationBetween(large, medium, config.relations), 'pursuit');
-  assert.equal(relationBetween(large, small, config.relations), 'pursuit');
-  assert.equal(relationBetween(small, large, config.relations), 'evade');
+  // KMax=1.667 引入后：大/小 = 2.25 超出猎物体型窗口 → 互相忽略。
+  // 这正是三层食物链（小←中←大）成立的条件；没有上界时大群会直接
+  // 吃小群，中群被绕过。见 tools/ecosystem_search.py
+  assert.equal(relationBetween(large, small, config.relations), 'ignore');
+  // 关系是对称的：大群吃不到小群，小群自然也不怕它。
+  assert.equal(relationBetween(small, large, config.relations), 'ignore');
   assert.equal(relationBetween(small, small, config.relations), 'peer');
 
   small.size = 3.2;

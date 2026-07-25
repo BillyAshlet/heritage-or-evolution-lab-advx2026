@@ -137,6 +137,19 @@ export class ExperimentCameraController {
       }
     });
     window.addEventListener('keydown', (event) => {
+      // 演示卫生：一键收掉全部调试 UI。路演、截图、录屏都需要。
+      // 注意：数字键 0/1/3/7 已被 scene.js 的 Blender 风格视角预设占用
+      // （Digit1 = 正视图），所以这里用 H（hide）。
+      if (event.key === 'h' || event.key === 'H') {
+        const node = event.target;
+        if (node && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA')) {
+          return;
+        }
+        event.preventDefault();
+        const app = document.getElementById('app');
+        app.dataset.uiHidden = app.dataset.uiHidden === '1' ? '' : '1';
+        return;
+      }
       if (event.key !== 'Escape') return;
       if (this.mode !== CAMERA_MODE.GLOBAL || this.selected >= 0) {
         event.preventDefault();

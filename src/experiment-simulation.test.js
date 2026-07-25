@@ -35,8 +35,9 @@ test('headless simulation does not require a THREE.Scene adapter', () => {
   assert.equal(simulation.mesh, null);
   assert.equal(simulation.captureVfx, null);
   assert.equal(school.cohesionRadius, school.neighborRadius);
-  assert.ok(school.alignmentRadius < school.separationRadius);
-  assert.ok(school.separationRadius < school.cohesionRadius);
+  // Classic boids proportions: alignment neighborhood is wider than separation.
+  assert.ok(school.separationRadius < school.alignmentRadius);
+  assert.ok(school.alignmentRadius < school.cohesionRadius);
   simulation._advance(1 / 60);
   assert.ok(simulation.elapsed > 0);
 });
@@ -114,6 +115,11 @@ test('predators outside local hunt radius remain ordinary boids', () => {
   simulation.config.locomotion.boundaryWeight = 0;
   simulation.config.locomotion.avoidanceWeight = 0;
   simulation.config.locomotion.wanderWeight = 0;
+  // Keep school-sense from reaching across the staged gap; this test isolates
+  // the local burst/pursuit layer, not the long-range school approach layer.
+  simulation.config.relations.schoolSenseFactor = 1;
+  simulation.config.relations.pursuitWeight = 0;
+  simulation.config.relations.burstWeight = 0;
   for (const school of simulation.config.schools) {
     school.separationWeight = 0;
     school.alignmentWeight = 0;
@@ -198,6 +204,9 @@ test('seeded initial simulation state is reproducible', () => {
 
 test('random spawn scatters fish across the tank instead of school clusters', () => {
   const simulation = smallSimulation('steady', 4242);
+  // Default production mode is pods; this test isolates pure random scatter.
+  simulation.config.runtime.spawnMode = 'random';
+  simulation.reset(4242);
   assert.equal(simulation.config.runtime.spawnMode, 'random');
   const halfW = simulation.config.tank.width / 2;
   const xs = [];

@@ -121,9 +121,17 @@ export function captureRadius(config, predatorSchool, preySchool) {
   );
 }
 
-export function perPredatorCooldown(activePredatorCount, targetCaptureRate) {
+export function perPredatorCooldown(
+  activePredatorCount,
+  targetCaptureRate,
+  speedFactor = 1
+) {
   if (activePredatorCount <= 0 || targetCaptureRate <= 0) return Infinity;
-  return activePredatorCount / targetCaptureRate;
+  // 速度缩短【处理时间】。Python 模拟发现：只让速度提高攻击率的话，
+  // Holling II 的饱和上限 = 1/handling 与攻击率无关 —— 高猎物密度下
+  // 速度变成完全免费的参数，直接成为支配策略。
+  const handling = Math.max(0.2, speedFactor);
+  return activePredatorCount / targetCaptureRate / handling;
 }
 
 export function sustainedSpeedScale(config, school) {
@@ -159,10 +167,17 @@ export function effectiveMaxSpeed(config, school, state = 'cruise') {
 
 export function metabolicRate(config, school, bursting = false) {
   const ecology = config.ecology;
-  const basal =
-    ecology.basalRate /
-    Math.max(EPSILON, school.size ** ecology.basalSizeExponent);
-  return basal + (bursting ? ecology.burstMetabolicRate : 0);
+  const sizeScale = Math.max(
+    EPSILON,
+    school.size ** ecology.basalSizeExponent
+  );
+  const basal = ecology.basalRate / sizeScale;
+  if (!bursting) return basal;
+  // Kleiber 定律对【活动代谢】同样适用：大动物的单位体重活动耗能也更低。
+  // 原来 burstMetabolicRate 是平铺常数，导致大鱼的冲刺成本是自身基础代谢的
+  // 4.2 倍（小鱼只有 2.75 倍）—— 大鱼追猎几下就饿死了。
+  const burstScale = ecology.burstSizeScaled === false ? 1 : sizeScale;
+  return basal + ecology.burstMetabolicRate / burstScale;
 }
 
 export function stepPlankton({
@@ -208,21 +223,30 @@ export function ecologyOutcome(aliveCounts) {
 export function relationForRatio(ratio, relations, previous = 'ignore') {
   const { k, hysteresis } = relations;
   if (!Number.isFinite(ratio) || ratio <= 0) return 'ignore';
+  // 猎物体型窗口上界。生态学依据：捕食者只吃特定体型带内的猎物
+  // （鲸不追单只磷虾）。KMax<=0 或未设置 = 退回纯阈值。
+  // k × KMax = 大鱼体型/小鱼体型 时，"能吃"与"会被吃"两个区间完全重合，
+  // 玩家要么在食物链里（又吃又被吃），要么在外面（安全但没饭）。
+  const kMax = relations.KMax > k ? relations.KMax : Infinity;
+  const upper = kMax === Infinity ? Infinity : kMax + hysteresis;
   if (
     previous === 'pursuit' &&
-    ratio >= Math.max(1, k - hysteresis)
+    ratio >= Math.max(1, k - hysteresis) &&
+    ratio <= upper
   ) {
     return 'pursuit';
   }
   if (
     previous === 'evade' &&
-    ratio <= 1 / Math.max(1 + EPSILON, k - hysteresis)
+    ratio <= 1 / Math.max(1 + EPSILON, k - hysteresis) &&
+    ratio >= 1 / upper
   ) {
     return 'evade';
   }
-  if (ratio >= k) return 'pursuit';
-  if (ratio <= 1 / k) return 'evade';
-  return 'peer';
+  if (ratio >= k && ratio <= kMax) return 'pursuit';
+  if (ratio <= 1 / k && ratio >= 1 / kMax) return 'evade';
+  if (ratio > 1 / k && ratio < k) return 'peer';
+  return 'ignore';
 }
 
 export function relationBetween(

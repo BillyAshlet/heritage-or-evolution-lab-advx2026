@@ -49,8 +49,11 @@ function restoreDefaultSchoolLayout(stage) {
 
 function applyPopulationPreset(stage) {
   const presets = {
-    full: { small: 400, medium: 200, large: 40 },
-    performance: { small: 200, medium: 80, large: 20 },
+    // 大群数量必须够高，否则 cohesionRadius 追不上平均间距，
+    // 全缸随机出生时它从第一帧就感知不到同伴，永远不成群。
+    // 捕获速率由每群共享节流决定，与数量无关，所以提高数量不加剧捕食。
+    full: { small: 400, medium: 200, large: 80 },
+    performance: { small: 200, medium: 80, large: 40 },
   };
   const counts = presets[stage.runtime.populationPreset];
   if (!counts) return;
@@ -90,8 +93,11 @@ function applyProjectPreset(stage) {
       school.spawnRegion.centerX = obstacleCenters[school.id] ?? 0;
       school.spawnRegion.centerY = 0;
       school.spawnRegion.centerZ = -0.35;
-      school.spawnRegion.radius = school.id === 'large' ? 0.14 : 0.18;
-      school.initialHeading = { x: 0, y: 0, z: 1 };
+      // blob 要大于该群 separationRadius，否则出生即互斥爆开
+      school.spawnRegion.radius = school.id === 'large' ? 0.3 : 0.26;
+      // 这个缸是 2.0 × 1.2 × 0.8，z 是最短轴（±0.4）。
+      // 原来朝 z 出发 = 整群列队冲向最近的墙。
+      school.initialHeading = { x: 1, y: 0, z: 0 };
     }
   } else if (stage.runtime.project === 'ecology') {
     Object.assign(stage.tank, {

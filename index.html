@@ -563,6 +563,18 @@
     </style>
   </head>
   <body>
+    <style>
+      /* 按 1 键收掉全部调试 UI —— 演示、截图、录屏用 */
+      #app[data-ui-hidden="1"] #panel-holder,
+      #app[data-ui-hidden="1"] #lab-mark,
+      #app[data-ui-hidden="1"] #startup-status,
+      #app[data-ui-hidden="1"] #experiment-dashboard,
+      #app[data-ui-hidden="1"] #fish-inspector,
+      #app[data-ui-hidden="1"] #fish-view-hud,
+      #app[data-ui-hidden="1"] #enable-tilt {
+        display: none !important;
+      }
+    </style>
     <div id="app">
       <h1 id="lab-mark">
         <b id="lab-title">主水族馆</b>

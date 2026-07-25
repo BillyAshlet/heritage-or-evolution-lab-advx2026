@@ -53,7 +53,10 @@ test('default project is the live size-derived aquarium', () => {
   assert.equal(config.runtime.project, 'aquarium');
   assert.equal(config.runtime.mode, 'steady');
   assert.equal(config.ecology.enabled, true);
-  assert.equal(config.plankton.enabled, false);
+  // 浮游生物已重新启用（作为小鱼的主食），并加了存量下限防止吃光后
+  // logistic 再生卡在 0。可持续性核算：总消耗 10.1/s vs 再生上限 18.0/s。
+  assert.equal(config.plankton.enabled, true);
+  assert.ok(config.plankton.minFraction > 0);
   assert.ok(Math.abs(config.ecology.energyCapacity - 2 / 3) < 1e-12);
   assert.equal(config.ecology.minBurstEnergyRatio, 1 / 3);
   assert.deepEqual(projectOptions, ['aquarium', 'obstacle', 'ecology']);
@@ -75,10 +78,12 @@ test('default project is the live size-derived aquarium', () => {
       school.alignmentWeight,
       school.cohesionWeight,
     ]),
-    config.schools.map(() => [0.55, 0.45, 0.4])
+    // 权重语义已改：steerToward 归一化后，权重乘的是转向力而非原始量级。
+    // 这三个值现在对齐原版 boids.js（0.8 / 0.45 / 0.4）。
+    config.schools.map(() => [0.8, 0.45, 0.4])
   );
   assert.equal(config.locomotion.maxForce, 5.2);
-  assert.equal(config.perception.detectionLengthFactor, 0.45);
+  assert.equal(config.perception.detectionLengthFactor, 0.511);
   assert.equal(config.captureVfx.enabled, true);
 });
 

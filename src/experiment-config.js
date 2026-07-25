@@ -11,6 +11,7 @@ function school({
   count,
   size,
   targetNeighbors,
+  podCount,
   centerX,
 }) {
   return {
@@ -20,23 +21,31 @@ function school({
     count,
     size,
     targetNeighbors,
+    // 该鱼种分成几个小群（spawnMode='pods' 时生效）。
+    // 小群内互相看得见、小群之间看不见 —— 合并与再分裂由 boids 自己完成。
+    podCount,
     cruiseSpeed: 0.23,
     maxSpeed: 0.46,
     turnSpeed: 2.8,
-    grazeRate: id === 'small' ? 1 : id === 'medium' ? 0.25 : 0,
-    separationWeight: 0.55,
+    // 觅食效率：同时决定进食【转化率】和【尝试频率】。
+    // 小鱼靠浮游为生；中鱼 1/4；大鱼 0.01 ≈ 几乎不主动吃浮游。
+    // "优先吃鱼"由代码保证：锁定猎物时不觅食（见 _updateEcology）。
+    grazeRate: id === 'small' ? 1 : id === 'medium' ? 0.25 : 0.01,
+    separationWeight: 0.8,
     alignmentWeight: 0.45,
     cohesionWeight: 0.4,
     spawnRegion: {
       centerX,
       centerY: 0,
       centerZ: 0,
-      radius: id === 'large' ? 0.22 : 0.3,
+      // 出生 blob 必须明显大于该群的 separationRadius，否则整群在出生瞬间
+      // 全部落在彼此的排斥半径内，会被一起炸开。大群的 sepR 最大(0.189)
+      // 而原来 blob 最小(0.22) —— 64% 的鱼互斥，这就是"开局往反方向跑"。
+      radius: id === 'large' ? 0.45 : 0.36,
     },
-    initialHeading:
-      id === 'large'
-        ? { x: 1, y: 0, z: 0 }
-        : { x: 0, y: 0, z: 1 },
+    // 全部朝最长轴（x）。原来小/中朝 z，而 z 只有 x 的 1/2.5 长，
+    // 整群列队同向出发 → 几秒内一起撞墙。
+    initialHeading: { x: 1, y: 0, z: 0 },
   };
 }
 
@@ -46,37 +55,42 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     mode: 'steady',
     populationPreset: 'full',
     seed: 1001,
+    // 每次重开是否换新种子。关掉则每局完全一致（调试/复现用）。
+    randomizeSeed: true,
     timeScale: 1,
     fixedDt: 1 / 60,
     initialSpawnAttempts: 16,
-    spawnMode: 'random',
+    spawnMode: 'pods',
   },
   schools: [
     school({
       id: 'small',
       name: '小群',
-      color: '#4f9fcf',
+      color: '#e5a441',
       count: 400,
       size: 1,
       targetNeighbors: 8,
+      podCount: 10,
       centerX: 0.32,
     }),
     school({
       id: 'medium',
       name: '中群',
-      color: '#e5a441',
+      color: '#4f9fcf',
       count: 200,
       size: 1.5,
       targetNeighbors: 8,
+      podCount: 8,
       centerX: -0.05,
     }),
     school({
       id: 'large',
       name: '大群',
       color: '#c95252',
-      count: 40,
+      count: 80,
       size: 2.25,
-      targetNeighbors: 2,
+      targetNeighbors: 5,
+      podCount: 8,
       centerX: -0.38,
     }),
   ],
@@ -90,26 +104,91 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
   },
   perception: {
     minNeighborRadiusFactor: 3,
-    alignmentRadiusFactor: 0.35,
-    separationRadiusFactor: 0.4,
-    detectionLengthFactor: 0.45,
+    // 比例对齐原版 boids.js（sep 0.1 / ali 0.24 / coh 0.45 / detect 0.23）。
+    // 原版的 alignment 邻域是 cohesion 的一半以上 —— 对齐邻居多，
+    // 才有"整片一起转"的鱼群感；separation 反而更紧，群才压得住。
+    alignmentRadiusFactor: 0.533,
+    separationRadiusFactor: 0.222,
+    detectionLengthFactor: 0.511,
+    // 视锥只门控 alignment/cohesion，separation 保持全向（侧线感）。
+    // 原版注释：前向视锥打破配对对称性，方向信息必须"传播"过鱼群
+    // 而不是瞬间同步 —— 这是鱼群感的来源。
+    fovDegrees: 300,
+    // 'inverse' = 原版默认，近距离斥力远强于线性
+    separationFalloff: 'inverse',
+    // 小群内平均间距 = 此系数 × separationRadius。1.5 = 不挤不散。
+    podSpacingFactor: 1.5,
+    // cohesion 距离衰减。'inverse' 让每条鱼被自己所在的小群主导，
+    // 小群才能维持而不是一碰就并；'uniform' 是经典 boids 的无权重质心。
+    cohesionFalloff: 'inverse',
+    // 出生朝向散布（0 = 整群同向列队，1 = 接近随机）
+    spawnHeadingJitter: 0.6,
+    // 体型 → 社群倾向：weight ×= size^-exponent。
+    // 0 = 体型不影响；越大越强调"大鱼独行、小鱼成群"。
+    // spawn-and-variety: 0.6 keeps size personality without collapsing medium/large sociality.
+    socialSizeExponent: 0.6,
     crossSeparationScale: 0.15,
   },
   relations: {
     k: 1.35,
+    // 猎物体型窗口上界。k × KMax = 2.25 = 大鱼体型/小鱼体型，
+    // 使"能吃小鱼"与"会被大鱼吃"两个区间完全重合 —— 消除
+    // "既能捕食又免疫"的支配策略。见 tools/ecosystem_search.py
+    // （搜索 216 种结构，稳定的前 8 名全部是 KMax=1.667）
+    KMax: 1.667,
     hysteresis: 0.1,
     pursuitWeight: 1.05,
     burstRadiusFactor: 0.75,
-    burstWeight: 10,
+    burstWeight: 2.2,
+    // 锁定目标的最短时间；期间不改锁（原版 targetLockTime 0.8）
+    targetLockTime: 0.8,
+    // 第一层（朝猎物群质心）的感知半径 = detectionLength × 此系数。
+    // 独立捕食者版本是 6 倍左右，所以能从远处平滑接近而不是贴脸猛窜。
+    // 大群 targetNeighbors 提高后 detectionLength 也涨了，
+    // 这个系数要跟着降，否则 performance 预设下感知半径会超出缸体，
+    // 捕食者在任何位置都知道猎物在哪，"远处平滑接近"就失效了。
+    schoolSenseFactor: 5,
     evadeWeight: 1.3,
     evadeLateralWeight: 0.32,
     directThreatPanic: 0.85,
     panicRiseRate: 4.5,
     panicDecayRate: 1.35,
+    // 惊扰波：恐慌沿邻居链传播的保留系数（每跳衰减 8%）
+    panicPropagation: 0.92,
+    // --- 脉冲/闩锁参数（dev 分支 PANIC_PARAMS 原值）---
+    directOn: 0.55,        // 直接威胁闩上的阈值
+    directOff: 0.25,       // 松开阈值（滞回，防抖）
+    holdTime: 0.5,         // 惊吓后恐慌钉在满值的时长 —— 四散而逃靠它
+    refractoryTime: 1.4,   // 不应期，防止脉冲在鱼群里无限回响
+    signalDecayTime: 0.35, // alarm 脉冲的指数衰减时间常数
+    // 应急对齐：恐慌航向走独立通道，不进普通 alignment 平均，
+    // 否则二十条镇定的邻居会把唯一看见危险的那条稀释掉。
+    signalRadiusFactor: 0.8,
+    signalThreshold: 0.35,
+    emergencyAlignmentWeight: 4,
+    alignmentSourceBoost: 10,
+    // 接收方增益：自己越慌越会听邻居（原版 alignmentReceiverBoost/Max）
+    alignmentReceiverBoost: 1.5,
+    alignmentReceiverMax: 2.5,
+    // 逃逸瞄准捕食者的预测位置，不是当前位置
+    escapePredictionTime: 0.15,
+    // 受惊时鱼群是散开（flash expansion），不是收紧。原版验证过的方向。
+    cohesionDrop: 0.6,
+    panicTurnBoost: 1.2,
+    // 低于此恐慌不施加逃逸力，避免整缸永远轻微抖动
+    panicMinTrigger: 0.06,
   },
   locomotion: {
     burstFactor: 1.35,
     panicSpeedFactor: 1.15,
+    // 冲刺时身体绷直、转不动 —— 会冲过头，这是"像鱼"和"像粒子"的分界
+    burstTurnFactor: 0.4,
+    // 原版：鱼不会像潜艇一样垂直上下游。俯仰超过此角就压回去。
+    maxPitchDegrees: 57,
+    // 冲刺时社交权重的压低倍率（脱队扑食，但不脱离物理量级）
+    burstSocialSuppression: 0.3,
+    // 冲刺时的额外力预算倍率
+    burstForceBudget: 1.6,
     maxForce: 5.2,
     interceptLookAhead: 1.3,
     boundaryWeight: 1.8,
@@ -129,6 +208,13 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     enabled: true,
     energyCapacity: 2 / 3,
     initialEnergyRatio: 0.82,
+    // 初始能量的个体抖动 ±比例。0 = 同族起点完全相同 → 必然同时饿死。
+    initialEnergyJitter: 0.25,
+    // 进食所得的倍率（"增加恢复耐力权重"）
+    forageEnergyMultiplier: 2.2,
+    // 进食/捕食所得投入族群共享池的比例，逐帧平均分给同族存活个体。
+    // 抑制个体方差：进食权重可以调高，而同族差距不至于失控。
+    energyShareFraction: 0.4,
     basalRate: 0.02,
     basalSizeExponent: 0.75,
     burstMetabolicRate: 0.035,
@@ -137,9 +223,22 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     minBurstEnergyRatio: 1 / 3,
     carrionEnergy: 0.18,
     carrionRadius: 0.08,
+    // 浮尸上浮速度（真实死鱼因鱼鳔残气多半浮起）
+    corpseRiseSpeed: 0.06,
+    // 死亡渐变时长：颜色 本族→灰、姿态 逐渐翻肚、上浮渐入，都用这个时间常数
+    corpseFadeTime: 1.6,
+    // 死后残余动量的指数衰减率（滑行一段再停住）
+    corpseDrag: 2.4,
+    // 冲刺代谢是否按体型缩放（Kleiber）。false = 回到旧的平铺常数
+    burstSizeScaled: true,
+    // 单次浮游进食的基础能量。远低于浮尸，所以觅食时浮尸优先。
+    planktonEnergy: 0.06,
+    // 只有能量低于 容量×此比例 才觅食。这是浮游可持续的关键门控：
+    // 无门控时 64/s 消耗 vs 18/s 再生，几秒吃光且永不恢复。
+    grazeHungerRatio: 0.8,
   },
   plankton: {
-    enabled: false,
+    enabled: true,
     capacity: 600,
     initialFraction: 0.8,
     growthRate: 0.12,
@@ -147,18 +246,31 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     maxIntakePerFish: 0.04,
     energyConversion: 1,
     visualCount: 1200,
-    pointSize: 0.012,
-    color: '#91b957',
-    opacity: 0.72,
+    // sizeAttenuation=true，所以这是【世界单位】。0.01 在正常机位下只有
+    // 约 1.5 像素 —— 那就是"看不见任何浮游生物"的原因。
+    // 0.03 = 4.5 像素，且正好等于鱼体长（bodyLength 0.03），符合"和尸体差不多大"。
+    pointSize: 0.03,
+    // 浅色半透明：缸体/背景深蓝 #071e3d、鱼是蓝/橙/红、浮尸灰 #6b6f74，
+    // 淡薄荷白与这四者都能区分。
+    color: '#dcf1e6',
+    opacity: 0.75,
+    // 存量下限：logistic 在 0 处 growth=0，吃光就永不恢复
+    minFraction: 0.01,
   },
   visual: {
     bodyLength: 0.03,
     bodyRadius: 0.008,
     radialSegments: 6,
     opacity: 0.92,
+    // 侧倾：转向率 → 绕自身前进轴的滚转角
+    bankingGain: 12,
+    maxRollDegrees: 35,
+    bankingSmoothing: 0.18,
   },
   capture: {
-    targetCaptureRate: 3,
+    // 3/秒会让玩家的中群在 67 秒内被吃光（关卡 120 秒）。
+    // 0.8/秒 → 120 秒损失约 48%，留得住抉择空间。
+    targetCaptureRate: 0.8,
     captureLengthFactor: 0.5,
   },
   debug: {
@@ -182,6 +294,14 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     biteGlowDuration: 0.45,
     biteGlowStrength: 0.85,
     biteGlowFalloff: 2.4,
+    // 进食特效：一小簇向上飘散的浅色碎屑
+    feedEnabled: true,
+    feedParticles: 3,
+    feedSpeed: 0.12,
+    feedSize: 0.009,
+    feedLifetime: 0.32,
+    feedColor: '#dcf1e6',
+    maxParticles: 600,
   },
   starvationVfx: {
     particleCount: 10,
@@ -344,6 +464,7 @@ const scalarEntries = [
       },
     }
   ),
+  entry('runtime.randomizeSeed', '运行', '每局随机种子', 'live'),
   entry('runtime.seed', '运行', 'seed', 'reset', {
     min: 1,
     max: 999999,
@@ -372,8 +493,9 @@ const scalarEntries = [
   ),
   entry('runtime.spawnMode', '运行', 'spawn mode', 'reset', {
     options: {
+      '分小群（fission-fusion）': 'pods',
       '全缸随机': 'random',
-      '分团出生': 'cluster',
+      '整群一团': 'cluster',
     },
   }),
   entry('tank.preset', '缸体', 'preset', 'rebuildScene', {
@@ -449,6 +571,32 @@ const scalarEntries = [
     'live',
     { min: 0.1, max: 2, step: 0.01 }
   ),
+  entry('perception.fovDegrees', '感知', '视锥角度', 'live', {
+    min: 60,
+    max: 360,
+    step: 5,
+  }),
+  entry('perception.separationFalloff', '感知', '分离衰减', 'live', {
+    options: { Inverse: 'inverse', Linear: 'linear', InvLog: 'invlog' },
+  }),
+  entry('perception.podSpacingFactor', '感知', '小群内间距 ×', 'reset', {
+    min: 0.6,
+    max: 4,
+    step: 0.05,
+  }),
+  entry('perception.cohesionFalloff', '感知', 'cohesion 衰减', 'live', {
+    options: { 'Inverse（小群可维持）': 'inverse', 'Uniform（经典 boids）': 'uniform' },
+  }),
+  entry('perception.spawnHeadingJitter', '感知', '出生朝向散布', 'reset', {
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+  }),
+  entry('perception.socialSizeExponent', '感知', '体型→独行倾向', 'live', {
+    min: 0,
+    max: 3,
+    step: 0.05,
+  }),
   entry(
     'perception.crossSeparationScale',
     '跨鱼群作用',
@@ -456,6 +604,11 @@ const scalarEntries = [
     'live',
     { min: 0.02, max: 0.5, step: 0.01 }
   ),
+  entry('relations.KMax', '关系', '猎物体型窗口上界', 'live', {
+    min: 1.05,
+    max: 6,
+    step: 0.01,
+  }),
   entry('relations.k', '关系', '捕食体型阈值 k', 'live', {
     min: 1.01,
     max: 2,
@@ -510,6 +663,116 @@ const scalarEntries = [
   entry('relations.panicDecayRate', '关系', 'panic decay /s', 'live', {
     min: 0.1,
     max: 10,
+    step: 0.05,
+  }),
+  entry('relations.panicPropagation', '关系', 'panic 邻居传播', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('relations.schoolSenseFactor', '关系', '群体感知 ×', 'live', {
+    min: 1,
+    max: 12,
+    step: 0.25,
+  }),
+  entry('relations.targetLockTime', '关系', '目标锁定时长', 'live', {
+    min: 0,
+    max: 5,
+    step: 0.05,
+  }),
+  entry('relations.signalRadiusFactor', '关系', '应急信号半径 ×', 'live', {
+    min: 0.1,
+    max: 3,
+    step: 0.05,
+  }),
+  entry('relations.signalThreshold', '关系', '应急信号阈值', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('relations.directOn', '关系', '直接威胁闩上', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('relations.directOff', '关系', '直接威胁松开', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('relations.holdTime', '关系', '惊吓保持时长', 'live', {
+    min: 0,
+    max: 3,
+    step: 0.05,
+  }),
+  entry('relations.refractoryTime', '关系', '不应期', 'live', {
+    min: 0,
+    max: 6,
+    step: 0.05,
+  }),
+  entry('relations.signalDecayTime', '关系', '脉冲衰减时间', 'live', {
+    min: 0.05,
+    max: 2,
+    step: 0.01,
+  }),
+  entry('relations.emergencyAlignmentWeight', '关系', '应急对齐权重', 'live', {
+    min: 0,
+    max: 12,
+    step: 0.1,
+  }),
+  entry('relations.alignmentSourceBoost', '关系', '应急航向优先度', 'live', {
+    min: 0,
+    max: 30,
+    step: 0.5,
+  }),
+  entry('relations.alignmentReceiverBoost', '关系', '恐慌时倾听增益', 'live', {
+    min: 0,
+    max: 6,
+    step: 0.05,
+  }),
+  entry('relations.alignmentReceiverMax', '关系', '倾听增益上限', 'live', {
+    min: 1,
+    max: 6,
+    step: 0.05,
+  }),
+  entry('relations.escapePredictionTime', '关系', '逃逸预判时间', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('relations.cohesionDrop', '关系', 'panic → cohesion 下降', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('relations.panicTurnBoost', '关系', 'panic → 转向加成', 'live', {
+    min: 0,
+    max: 4,
+    step: 0.05,
+  }),
+  entry('relations.panicMinTrigger', '关系', 'panic 触发下限', 'live', {
+    min: 0,
+    max: 0.5,
+    step: 0.01,
+  }),
+  entry('locomotion.burstTurnFactor', '运动', '冲刺转向 ×', 'live', {
+    min: 0.05,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('locomotion.maxPitchDegrees', '运动', '最大俯仰角', 'live', {
+    min: 5,
+    max: 90,
+    step: 1,
+  }),
+  entry('locomotion.burstSocialSuppression', '运动', '冲刺时社交压低 ×', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('locomotion.burstForceBudget', '运动', '冲刺力预算 ×', 'live', {
+    min: 1,
+    max: 6,
     step: 0.05,
   }),
   entry('locomotion.burstFactor', '运动', 'pursuit burst ×', 'live', {
@@ -609,6 +872,21 @@ const scalarEntries = [
     'reset',
     { min: 0.01, max: 1, step: 0.01 }
   ),
+  entry('ecology.initialEnergyJitter', '生态能量', '初始能量抖动 ±', 'reset', {
+    min: 0,
+    max: 0.8,
+    step: 0.01,
+  }),
+  entry('ecology.forageEnergyMultiplier', '生态能量', '进食能量 ×', 'live', {
+    min: 0.1,
+    max: 8,
+    step: 0.05,
+  }),
+  entry('ecology.energyShareFraction', '生态能量', '族群共享比例', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  }),
   entry('ecology.basalRate', '生态能量', 'basal drain /s', 'live', {
     min: 0,
     max: 1,
@@ -648,6 +926,32 @@ const scalarEntries = [
     'live',
     { min: 0, max: 1, step: 0.01 }
   ),
+  entry('ecology.corpseFadeTime', '生态能量', '死亡渐变时长', 'live', {
+    min: 0.1,
+    max: 8,
+    step: 0.1,
+  }),
+  entry('ecology.corpseDrag', '生态能量', '尸体阻尼', 'live', {
+    min: 0,
+    max: 12,
+    step: 0.1,
+  }),
+  entry('ecology.burstSizeScaled', '生态能量', '冲刺代谢按体型缩放', 'live'),
+  entry('ecology.corpseRiseSpeed', '生态能量', '浮尸上浮速度', 'live', {
+    min: 0,
+    max: 0.5,
+    step: 0.005,
+  }),
+  entry('ecology.planktonEnergy', '生态能量', '浮游单次能量', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.005,
+  }),
+  entry('ecology.grazeHungerRatio', '生态能量', '觅食饥饿阈值', 'live', {
+    min: 0.1,
+    max: 1,
+    step: 0.01,
+  }),
   entry(
     'ecology.carrionEnergy',
     '生态能量',
@@ -708,6 +1012,11 @@ const scalarEntries = [
     'rebuildScene',
     { min: 0, max: 10000, step: 1 }
   ),
+  entry('plankton.minFraction', '浮游资源', '存量下限比例', 'live', {
+    min: 0,
+    max: 0.3,
+    step: 0.005,
+  }),
   entry('plankton.pointSize', '浮游资源', 'particle size', 'live', {
     min: 0.001,
     max: 0.08,
@@ -736,6 +1045,21 @@ const scalarEntries = [
     'rebuildScene',
     { min: 3, max: 16, step: 1 }
   ),
+  entry('visual.bankingGain', '视觉', '侧倾强度', 'live', {
+    min: 0,
+    max: 40,
+    step: 0.5,
+  }),
+  entry('visual.maxRollDegrees', '视觉', '最大侧倾角', 'live', {
+    min: 0,
+    max: 80,
+    step: 1,
+  }),
+  entry('visual.bankingSmoothing', '视觉', '侧倾平滑', 'live', {
+    min: 0.02,
+    max: 1,
+    step: 0.01,
+  }),
   entry('visual.opacity', 'Advanced · Visual', 'fish opacity', 'live', {
     min: 0.1,
     max: 1,
@@ -819,6 +1143,23 @@ const scalarEntries = [
     min: 0,
     max: 3,
     step: 0.01,
+  }),
+  entry('captureVfx.feedEnabled', '捕获特效', '进食特效', 'live'),
+  entry('captureVfx.feedParticles', '捕获特效', '进食碎屑数', 'live', {
+    min: 1, max: 12, step: 1,
+  }),
+  entry('captureVfx.feedSpeed', '捕获特效', '进食扩散速度', 'live', {
+    min: 0, max: 1, step: 0.01,
+  }),
+  entry('captureVfx.feedSize', '捕获特效', '进食碎屑尺寸', 'live', {
+    min: 0.002, max: 0.04, step: 0.001,
+  }),
+  entry('captureVfx.feedLifetime', '捕获特效', '进食碎屑寿命', 'live', {
+    min: 0.05, max: 2, step: 0.01,
+  }),
+  entry('captureVfx.feedColor', '捕获特效', '进食碎屑颜色', 'live'),
+  entry('captureVfx.maxParticles', '捕获特效', '粒子上限', 'live', {
+    min: 32, max: 4000, step: 8,
   }),
   entry('captureVfx.biteGlowFalloff', '捕获特效', '闪光衰减', 'live', {
     min: 0,
@@ -1061,6 +1402,11 @@ function schoolEntries(config) {
         min: 0.2,
         max: 5,
         step: 0.01,
+      }),
+      entry(`${p}.podCount`, group, '小群数量', 'reset', {
+        min: 1,
+        max: 80,
+        step: 1,
       }),
       entry(
         `${p}.targetNeighbors`,

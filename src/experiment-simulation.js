@@ -46,6 +46,37 @@ function normalize3(x, y, z) {
   return [x / magnitude, y / magnitude, z / magnitude, magnitude];
 }
 
+// 原版 boids.js 的核心：每条规则先归一化成"期望速度"，减去当前速度，
+// 钳到 maxForce，之后才乘权重。实验版原来是原始量级直接加权求和 ——
+// cohesion ∝ 到群心距离、alignment ∝ 速度差、separation ∝ 1/d²，
+// 三者量纲不同，权重比值随密度和距离乱变。这是"不像原版"的根因。
+function steerToward(dx, dy, dz, vx, vy, vz, maxSpeed, maxForce, out) {
+  const length = Math.hypot(dx, dy, dz);
+  if (length <= EPSILON) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    return out;
+  }
+  const scale = maxSpeed / length;
+  let sx = dx * scale - vx;
+  let sy = dy * scale - vy;
+  let sz = dz * scale - vz;
+  const magnitude = Math.hypot(sx, sy, sz);
+  if (magnitude > maxForce) {
+    const clamp = maxForce / magnitude;
+    sx *= clamp;
+    sy *= clamp;
+    sz *= clamp;
+  }
+  out[0] = sx;
+  out[1] = sy;
+  out[2] = sz;
+  return out;
+}
+
+const STEER_SCRATCH = new Float64Array(3);
+
 function add3(array, index, x, y, z) {
   const offset = index * 3;
   array[offset] += x;
@@ -115,10 +146,41 @@ export class ExperimentSimulation {
     this.schoolIds = new Uint16Array(this.count);
     this.alive = new Uint8Array(this.count);
     this.panic = new Float32Array(this.count);
+    // --- 恐慌传播（惊扰波）：直接感知强度、邻居恐慌、邻居逃逸方向 ---
+    this.threatLevel = new Float32Array(this.count);
+    this.neighborPanic = new Float32Array(this.count);
+    this.neighborEvade = new Float32Array(this.count * 3);
+    // 应急对齐通道：恐慌航向不进普通 alignment 平均
+    this.emergencyAlign = new Float32Array(this.count * 3);
+    this.emergencyUrgency = new Float32Array(this.count);
+    // 目标锁定：原版 targetLockTime 0.8s。不锁定的话捕食者会在几条猎物
+    // 之间每帧乱跳，那是最像粒子的一种运动。
+    this.lockedTargets = new Int32Array(this.count).fill(-1);
+    this.lockTimers = new Float32Array(this.count);
+    // --- 脉冲/闩锁式恐慌（移植自 dev 分支 boids.js）---
+    // 连续跟踪不会产生"惊吓"，而且社会传播没有不应期会无限回响。
+    this.alarm = new Float32Array(this.count);       // 离散脉冲，指数衰减
+    this.heardSignal = new Float32Array(this.count); // 本帧收到的社会信号
+    this.panicHold = new Float32Array(this.count);   // 满恐慌保持计时
+    this.refractory = new Float32Array(this.count);  // 不应期
+    this.directLatch = new Uint8Array(this.count);   // 直接威胁闩锁（滞回）
+    // 侧倾：转弯时鱼体侧过来。不改行为，但决定"像不像鱼"。
+    this.rollAngles = new Float32Array(this.count);
+    this.prevHeadings = new Float32Array(this.count * 3);
+    this.escapeDir = new Float32Array(this.count * 3);
     this.energy = new Float32Array(this.count);
+    // 每族一个能量共享池（进食所得的一部分汇入，逐帧平均分发）
+    this.energyPools = new Float64Array(config.schools.length);
+    // 尸体 = 鱼模型本身。1 = 浮尸（可见、灰色、上浮、可被吃），0 = 活着或已被吃掉。
+    this.corpse = new Uint8Array(this.count);
+    // 死后经过的秒数，驱动颜色渐变 / 翻身 / 上浮渐入
+    this.corpseAge = new Float32Array(this.count);
+    this.corpseColor = new THREE.Color('#6b6f74');
+    this.schoolColors = config.schools.map((sc) => new THREE.Color(sc.color));
     this.locomotionStates = new Uint8Array(this.count);
     this.cooldowns = new Float32Array(this.count);
     this.wanderPhases = new Float32Array(this.count);
+    this.wanderRates = new Float32Array(this.count);
     this.sameNeighbors = new Uint16Array(this.count);
     this.cohesionCounts = new Uint16Array(this.count);
     this.predationCounts = new Uint16Array(this.count);
@@ -232,7 +294,14 @@ export class ExperimentSimulation {
     this.scene.add(this.planktonMesh);
   }
 
-  reset(seed = this.config.runtime.seed) {
+  reset(seed = undefined) {
+    // 每局随机种子：不然初始位置、初速度、wander 相位全部相同，
+    // 而模拟本身是确定性的 —— 每局都会跑出一模一样的结果。
+    if (seed === undefined) {
+      seed = this.config.runtime.randomizeSeed
+        ? (Math.random() * 0xffffffff) >>> 0
+        : this.config.runtime.seed;
+    }
     this.rng = new SeededRng(seed);
     this.seed = Number(seed);
     this.config.runtime.seed = this.seed;
@@ -258,10 +327,30 @@ export class ExperimentSimulation {
     this.captureVfx?.reset();
     this.alive.fill(1);
     this.panic.fill(0);
-    this.energy.fill(
-      this.config.ecology.energyCapacity *
-        this.config.ecology.initialEnergyRatio
-    );
+    this.escapeDir.fill(0);
+    this.lockedTargets.fill(-1);
+    this.lockTimers.fill(0);
+    this.alarm.fill(0);
+    this.heardSignal.fill(0);
+    this.panicHold.fill(0);
+    this.refractory.fill(0);
+    this.directLatch.fill(0);
+    this.rollAngles.fill(0);
+    this.prevHeadings.fill(0);
+    // 初始能量必须有个体差异。原来同种族每条鱼起点完全相同，而代谢
+    // 也是确定的（basalRate/size^0.75），所以第一波必然在同一秒集体饿死。
+    {
+      const capacity = this.config.ecology.energyCapacity;
+      const base = capacity * this.config.ecology.initialEnergyRatio;
+      const jitter = Math.max(0, this.config.ecology.initialEnergyJitter ?? 0);
+      for (let index = 0; index < this.count; index += 1) {
+        const factor = jitter > 0 ? 1 + this.rng.range(-jitter, jitter) : 1;
+        this.energy[index] = Math.min(capacity, Math.max(0, base * factor));
+      }
+    }
+    this.energyPools.fill(0);
+    this.corpse.fill(0);
+    this.corpseAge.fill(0);
     this.locomotionStates.fill(LOCOMOTION.CRUISE);
     this.pursuitTargets.fill(-1);
     this.targetAlignment.fill(-Infinity);
@@ -277,7 +366,9 @@ export class ExperimentSimulation {
     ) {
       const school = this.config.schools[schoolIndex];
       const range = this.schoolRanges[schoolIndex];
-      const spawnMode = this.config.runtime.spawnMode === 'cluster' ? 'cluster' : 'random';
+      const rawMode = this.config.runtime.spawnMode;
+      const spawnMode =
+        rawMode === 'cluster' || rawMode === 'pods' ? rawMode : 'random';
       const center = [
         school.spawnRegion.centerX * this.config.tank.width,
         school.spawnRegion.centerY * this.config.tank.height,
@@ -303,10 +394,63 @@ export class ExperimentSimulation {
         this.config.tank.height / 2 - wall,
         this.config.tank.depth / 2 - wall,
       ];
+
+      // --- 分群出生（fission-fusion）---
+      // 一个鱼种散成若干互不相邻的小群。合并与再分裂不需要额外逻辑：
+      // 只要小群内间距 < cohesionRadius、小群间距 > cohesionRadius，
+      // boids 自己就会维持小群、偶遇时合并、被冲散后重组。
+      let podCenters = null;
+      let podRadius = 0;
+      if (spawnMode === 'pods') {
+        const desired = Math.max(1, Math.round(school.podCount ?? 1));
+        const count = Math.max(1, range.end - range.start);
+        const pods = Math.min(desired, count);
+        // 小群半径必须由【每群条数】推导，不能只看 cohesionRadius：
+        //   群内平均间距 = podRadius × (4π/3m)^(1/3)，要求它 ≈ k × separationRadius
+        //   → podRadius = k × sepR × (3m/4π)^(1/3)
+        // 太小则整群出生即互斥爆开；太大则相邻小群表面进入 cohesionRadius，
+        // 开局就并成一团（这是"看不出小群"的原因）。
+        const perPod = count / pods;
+        podRadius =
+          (this.config.perception.podSpacingFactor ?? 1.5) *
+          this.derived.schools[schoolIndex].separationRadius *
+          Math.cbrt((3 * perPod) / (4 * Math.PI));
+        podCenters = [];
+        for (let p = 0; p < pods; p += 1) {
+          let best = null;
+          let bestScore = -Infinity;
+          // 采样若干候选，挑离已有小群最远的那个，避免开局就挤在一起
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            const candidate = [
+              this.rng.range(-half[0] + podRadius, half[0] - podRadius),
+              this.rng.range(-half[1] + podRadius, half[1] - podRadius),
+              this.rng.range(-half[2] + podRadius, half[2] - podRadius),
+            ];
+            let nearest = Infinity;
+            for (const existing of podCenters) {
+              const dx = candidate[0] - existing[0];
+              const dy = candidate[1] - existing[1];
+              const dz = candidate[2] - existing[2];
+              nearest = Math.min(nearest, dx * dx + dy * dy + dz * dz);
+            }
+            if (nearest > bestScore) {
+              bestScore = nearest;
+              best = candidate;
+            }
+          }
+          podCenters.push(best);
+        }
+      }
+
       for (let index = range.start; index < range.end; index += 1) {
+        const podCenter = podCenters
+          ? podCenters[(index - range.start) % podCenters.length]
+          : null;
         let spawn =
           spawnMode === 'cluster'
             ? center.slice()
+            : podCenter
+            ? podCenter.slice()
             : [
                 this.rng.range(-half[0], half[0]),
                 this.rng.range(-half[1], half[1]),
@@ -318,13 +462,14 @@ export class ExperimentSimulation {
           attempt += 1
         ) {
           let candidate;
-          if (spawnMode === 'cluster') {
+          if (spawnMode === 'cluster' || podCenter) {
             const point = this.rng.inUnitSphere();
-            const radius = school.spawnRegion.radius;
+            const origin = podCenter ?? center;
+            const radius = podCenter ? podRadius : school.spawnRegion.radius;
             candidate = [
-              clamp(center[0] + point[0] * radius, -half[0], half[0]),
-              clamp(center[1] + point[1] * radius, -half[1], half[1]),
-              clamp(center[2] + point[2] * radius, -half[2], half[2]),
+              clamp(origin[0] + point[0] * radius, -half[0], half[0]),
+              clamp(origin[1] + point[1] * radius, -half[1], half[1]),
+              clamp(origin[2] + point[2] * radius, -half[2], half[2]),
             ];
           } else {
             candidate = [
@@ -351,10 +496,12 @@ export class ExperimentSimulation {
         let direction;
         if (spawnMode === 'cluster') {
           const jitter = this.rng.unitVector();
+          // 散布太窄会让整群列队同向出发，一起撞墙。
+          const spread = this.config.perception.spawnHeadingJitter ?? 0.6;
           direction = normalize3(
-            heading[0] + jitter[0] * 0.16,
-            heading[1] + jitter[1] * 0.16,
-            heading[2] + jitter[2] * 0.16
+            heading[0] + jitter[0] * spread,
+            heading[1] + jitter[1] * spread,
+            heading[2] + jitter[2] * spread
           );
         } else {
           direction = this.rng.unitVector();
@@ -370,9 +517,12 @@ export class ExperimentSimulation {
           ? this.rng.range(0, period)
           : Infinity;
         this.wanderPhases[index] = this.rng.range(0, Math.PI * 2);
+        // 原来频率只有 index%13 共 13 档，整群会呈现可见的周期同步。
+        this.wanderRates[index] = this.rng.range(0.55, 0.95);
       }
     }
     this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
+    this._syncVfxBounds();
     this._syncPlanktonVisual();
     this.updateMesh();
     return this;
@@ -403,6 +553,14 @@ export class ExperimentSimulation {
       this.mesh.instanceColor.needsUpdate = true;
     }
     this._syncPlanktonVisual();
+  }
+
+  _syncVfxBounds() {
+    this.captureVfx?.setBounds?.([
+      this.config.tank.width / 2,
+      this.config.tank.height / 2,
+      this.config.tank.depth / 2,
+    ]);
   }
 
   _syncPlanktonVisual() {
@@ -440,6 +598,12 @@ export class ExperimentSimulation {
     this.predationCounts.fill(0);
     this.alignmentCounts.fill(0);
     this.threatCounts.fill(0);
+    this.threatLevel.fill(0);
+    this.neighborPanic.fill(0);
+    this.heardSignal.fill(0);
+    this.neighborEvade.fill(0);
+    this.emergencyAlign.fill(0);
+    this.emergencyUrgency.fill(0);
     this.pursuitTargets.fill(-1);
     this.targetAlignment.fill(-Infinity);
     this.targetDistance2.fill(Infinity);
@@ -527,50 +691,180 @@ export class ExperimentSimulation {
   _sameSchoolPair(i, j, dx, dy, dz, distance2) {
     const schoolIndex = this.schoolIds[i];
     const derived = this.derived.schools[schoolIndex];
+    const perception = this.config.perception;
+    const relations = this.config.relations;
+
+    // --- 视锥：只门控 alignment / cohesion，separation 保持全向 ---
+    // 前向视锥打破配对对称性 → 方向信息必须逐层传播，而不是瞬间同步。
+    // 这是"像鱼群"而不是"像一坨粒子"的主要来源。
+    let seeIJ = true;
+    let seeJI = true;
+    if (perception.fovDegrees < 360) {
+      const cosHalf = Math.cos((perception.fovDegrees * Math.PI) / 360);
+      const inverse = 1 / Math.sqrt(Math.max(distance2, EPSILON));
+      const io = i * 3;
+      const jo = j * 3;
+      const hi = normalize3(
+        this.velocities[io],
+        this.velocities[io + 1],
+        this.velocities[io + 2]
+      );
+      const hj = normalize3(
+        this.velocities[jo],
+        this.velocities[jo + 1],
+        this.velocities[jo + 2]
+      );
+      seeIJ = (dx * hi[0] + dy * hi[1] + dz * hi[2]) * inverse >= cosHalf;
+      seeJI = (-dx * hj[0] - dy * hj[1] - dz * hj[2]) * inverse >= cosHalf;
+    }
+
+    // --- 应急对齐：恐慌航向走独立通道 ---
+    const signalRadius = derived.alignmentRadius * relations.signalRadiusFactor;
+    const signalRadius2 = signalRadius * signalRadius;
+    const emitEmergency = (receiver, sender, canSee) => {
+      if (!canSee || distance2 >= signalRadius2) return false;
+      const urgency = this.panic[sender];
+      if (urgency < relations.signalThreshold) return false;
+      const distance = Math.sqrt(Math.max(distance2, EPSILON));
+      const proximity = 1 - distance / signalRadius;
+      const boost = relations.alignmentSourceBoost;
+      const weight = proximity * urgency * (1 + boost * urgency * urgency);
+      if (weight <= 1e-6) return false;
+      const so = sender * 3;
+      const heading = normalize3(
+        this.velocities[so],
+        this.velocities[so + 1],
+        this.velocities[so + 2]
+      );
+      add3(
+        this.emergencyAlign,
+        receiver,
+        heading[0] * weight,
+        heading[1] * weight,
+        heading[2] * weight
+      );
+      const urgencySignal = proximity * urgency;
+      if (urgencySignal > this.emergencyUrgency[receiver]) {
+        this.emergencyUrgency[receiver] = urgencySignal;
+      }
+      return true;
+    };
+    const emergencyIJ = emitEmergency(i, j, seeIJ);
+    const emergencyJI = emitEmergency(j, i, seeJI);
+
     if (distance2 <= derived.cohesionRadius ** 2) {
       this.sameNeighbors[i] += 1;
       this.sameNeighbors[j] += 1;
-      this.cohesionCounts[i] += 1;
-      this.cohesionCounts[j] += 1;
-      add3(
-        this.cohesionSums,
-        i,
-        this.positions[j * 3],
-        this.positions[j * 3 + 1],
-        this.positions[j * 3 + 2]
-      );
-      add3(
-        this.cohesionSums,
-        j,
-        this.positions[i * 3],
-        this.positions[i * 3 + 1],
-        this.positions[i * 3 + 2]
-      );
+      // 惊扰波：恐慌与逃逸方向沿邻居链传播（读的是上一帧的值）。
+      // 同样走视锥 —— 波因此有方向性，而不是向四面八方瞬间铺开。
+      const jo3 = j * 3;
+      const io3 = i * 3;
+      if (seeIJ) {
+        // 社会信号传的是 alarm【脉冲】，不是 panic 值 —— 脉冲会衰减到零，
+        // 不会像连续值那样在鱼群里无限回响。
+        const signal =
+          this.alarm[j] * (1 - Math.sqrt(distance2) / derived.cohesionRadius);
+        if (signal > this.heardSignal[i]) this.heardSignal[i] = signal;
+        if (this.panic[j] > this.neighborPanic[i]) {
+          this.neighborPanic[i] = this.panic[j];
+        }
+        add3(
+          this.neighborEvade,
+          i,
+          this.escapeDir[jo3],
+          this.escapeDir[jo3 + 1],
+          this.escapeDir[jo3 + 2]
+        );
+      }
+      if (seeJI) {
+        const signalBack =
+          this.alarm[i] * (1 - Math.sqrt(distance2) / derived.cohesionRadius);
+        if (signalBack > this.heardSignal[j]) this.heardSignal[j] = signalBack;
+        if (this.panic[i] > this.neighborPanic[j]) {
+          this.neighborPanic[j] = this.panic[i];
+        }
+        add3(
+          this.neighborEvade,
+          j,
+          this.escapeDir[io3],
+          this.escapeDir[io3 + 1],
+          this.escapeDir[io3 + 2]
+        );
+      }
+      // cohesion 权重：'inverse' 时按 1/(d²+ε) 加权。
+      // 这是拓扑式交互的廉价近似（Ballerini 等人发现椋鸟只跟约 7 个最近邻
+      // 互动，与距离无关）。效果是每条鱼被【自己所在的小群】主导，
+      // 远处的另一个小群拉不动它 —— 小群才能维持，而不是一碰就并成一团。
+      let cohW = 1;
+      if (perception.cohesionFalloff === 'inverse') {
+        const soft = derived.cohesionRadius * 0.15;
+        cohW = 1 / (distance2 + soft * soft);
+      }
+      if (seeIJ) {
+        this.cohesionCounts[i] += cohW;
+        add3(
+          this.cohesionSums,
+          i,
+          this.positions[j * 3] * cohW,
+          this.positions[j * 3 + 1] * cohW,
+          this.positions[j * 3 + 2] * cohW
+        );
+      }
+      if (seeJI) {
+        this.cohesionCounts[j] += cohW;
+        add3(
+          this.cohesionSums,
+          j,
+          this.positions[i * 3] * cohW,
+          this.positions[i * 3 + 1] * cohW,
+          this.positions[i * 3 + 2] * cohW
+        );
+      }
     }
     if (distance2 <= derived.alignmentRadius ** 2) {
-      this.alignmentCounts[i] += 1;
-      this.alignmentCounts[j] += 1;
-      add3(
-        this.alignmentSums,
-        i,
-        this.velocities[j * 3],
-        this.velocities[j * 3 + 1],
-        this.velocities[j * 3 + 2]
-      );
-      add3(
-        this.alignmentSums,
-        j,
-        this.velocities[i * 3],
-        this.velocities[i * 3 + 1],
-        this.velocities[i * 3 + 2]
-      );
+      if (seeIJ && !emergencyIJ) {
+        this.alignmentCounts[i] += 1;
+        add3(
+          this.alignmentSums,
+          i,
+          this.velocities[j * 3],
+          this.velocities[j * 3 + 1],
+          this.velocities[j * 3 + 2]
+        );
+      }
+      if (seeJI && !emergencyJI) {
+        this.alignmentCounts[j] += 1;
+        add3(
+          this.alignmentSums,
+          j,
+          this.velocities[i * 3],
+          this.velocities[i * 3 + 1],
+          this.velocities[i * 3 + 2]
+        );
+      }
     }
     if (distance2 <= derived.separationRadius ** 2) {
-      const distance = Math.sqrt(Math.max(EPSILON, distance2));
-      const strength = 1 - distance / derived.separationRadius;
-      const scale = strength / distance;
-      add3(this.separation, i, -dx * scale, -dy * scale, -dz * scale);
-      add3(this.separation, j, dx * scale, dy * scale, dz * scale);
+      // Identical positions produce 0 * Infinity = NaN; skip or floor distance.
+      if (distance2 <= EPSILON) {
+        // Deterministic tiny push so overlapping agents do not poison forces.
+        const push = 1 / EPSILON;
+        add3(this.separation, i, -push, 0, 0);
+        add3(this.separation, j, push, 0, 0);
+      } else {
+        const distance = Math.sqrt(distance2);
+        const radius = derived.separationRadius;
+        // 原版默认 inverse：近距离斥力远强于线性，鱼群能压得很紧而不穿模
+        let scale;
+        if (perception.separationFalloff === 'linear') {
+          scale = (radius - distance) / (radius * distance);
+        } else if (perception.separationFalloff === 'invlog') {
+          scale = Math.log(radius / distance) / distance;
+        } else {
+          scale = 1 / distance2;
+        }
+        add3(this.separation, i, -dx * scale, -dy * scale, -dz * scale);
+        add3(this.separation, j, dx * scale, dy * scale, dz * scale);
+      }
     }
   }
 
@@ -609,7 +903,12 @@ export class ExperimentSimulation {
     if (relation !== 'pursuit') return;
     const actorDetection =
       this.derived.schools[actorSchool].detectionLength;
-    if (distance2 <= actorDetection * actorDetection) {
+    // 第一层：远距离朝猎物群质心巡航。独立捕食者版本用的是
+    // schoolSenseRadius 1.0，比 detectionLength 大 6 倍 —— 所以它会从很远
+    // 处平滑靠拢，而不是贴近了才猛窜。
+    const senseRadius =
+      actorDetection * this.config.relations.schoolSenseFactor;
+    if (distance2 <= senseRadius * senseRadius) {
       add3(
         this.predationSums,
         actor,
@@ -651,10 +950,24 @@ export class ExperimentSimulation {
       this.derived.schools[targetSchool].panicRadius;
     if (distance2 <= preyDetection * preyDetection) {
       this.threatCounts[target] += 1;
-      const inverse = 1 / Math.max(distance, EPSILON);
-      const awayX = dx * inverse;
-      const awayY = dy * inverse;
-      const awayZ = dz * inverse;
+      // 距离衰减：贴脸的捕食者和边缘的捕食者不该产生同样的恐慌。
+      // 没有这一条，小缸里所有鱼永远处于满恐慌。
+      const proximity = 1 - distance / Math.max(preyDetection, EPSILON);
+      if (proximity > this.threatLevel[target]) {
+        this.threatLevel[target] = proximity;
+      }
+      // 逃向捕食者【预测位置】的反方向，而不是它此刻在哪
+      const lead = this.config.relations.escapePredictionTime;
+      const ao = actor * 3;
+      // dx 由 actor(捕食者) 指向 target(猎物)。捕食者前进 vel*lead 之后，
+      // 从它的未来位置指向猎物的向量 = dx − vel*lead。
+      const px = dx - this.velocities[ao] * lead;
+      const py = dy - this.velocities[ao + 1] * lead;
+      const pz = dz - this.velocities[ao + 2] * lead;
+      const inverse = 1 / Math.max(Math.hypot(px, py, pz), EPSILON);
+      const awayX = px * inverse;
+      const awayY = py * inverse;
+      const awayZ = pz * inverse;
       const velocityOffset = target * 3;
       const lateral = normalize3(
         this.velocities[velocityOffset + 1] * awayZ -
@@ -754,76 +1067,232 @@ export class ExperimentSimulation {
     return state;
   }
 
+  _resolveLock(index, dt) {
+    const previous = this.lockedTargets[index];
+    this.lockTimers[index] = Math.max(0, this.lockTimers[index] - dt);
+    const stillValid =
+      previous >= 0 && this.alive[previous] && this.lockTimers[index] > 0;
+    if (stillValid) {
+      // 锁定期内沿用旧目标，即使本帧选出了更"顺"的一条
+      this.pursuitTargets[index] = previous;
+      return;
+    }
+    const fresh = this.pursuitTargets[index];
+    if (fresh >= 0 && this.alive[fresh]) {
+      this.lockedTargets[index] = fresh;
+      this.lockTimers[index] = this.config.relations.targetLockTime;
+    } else {
+      this.lockedTargets[index] = -1;
+      this.lockTimers[index] = 0;
+    }
+  }
+
   _steerFish(index, dt) {
     if (!this.alive[index]) return;
+    this._resolveLock(index, dt);
     const offset = index * 3;
     const schoolIndex = this.schoolIds[index];
     const school = this.config.schools[schoolIndex];
     const cohesionCount = this.cohesionCounts[index];
     const alignmentCount = this.alignmentCounts[index];
-    let fx = this.separation[offset] * school.separationWeight;
-    let fy = this.separation[offset + 1] * school.separationWeight;
-    let fz = this.separation[offset + 2] * school.separationWeight;
-    if (cohesionCount > 0) {
-      fx +=
-        (this.cohesionSums[offset] / cohesionCount -
-          this.positions[offset]) *
-        school.cohesionWeight;
-      fy +=
-        (this.cohesionSums[offset + 1] / cohesionCount -
-          this.positions[offset + 1]) *
-        school.cohesionWeight;
-      fz +=
-        (this.cohesionSums[offset + 2] / cohesionCount -
-          this.positions[offset + 2]) *
-        school.cohesionWeight;
+
+    // --- 恐慌：先算，因为它要放大 alignment / cohesion ---
+    // 自己看见的（连续，按距离衰减） vs 从邻居继承的（惊扰波）
+    const relations = this.config.relations;
+    // --- 脉冲/闩锁式恐慌 ---
+    // 直接威胁走滞回：越过 directOn 才闩上，掉到 directOff 以下才松开。
+    const threat = this.threatLevel[index];
+    const wasLatched = this.directLatch[index] === 1;
+    if (!wasLatched && threat >= relations.directOn) {
+      this.directLatch[index] = 1;
+    } else if (wasLatched && threat < relations.directOff) {
+      this.directLatch[index] = 0;
     }
-    if (alignmentCount > 0) {
-      fx +=
-        (this.alignmentSums[offset] / alignmentCount -
-          this.velocities[offset]) *
-        school.alignmentWeight;
-      fy +=
-        (this.alignmentSums[offset + 1] / alignmentCount -
-          this.velocities[offset + 1]) *
-        school.alignmentWeight;
-      fz +=
-        (this.alignmentSums[offset + 2] / alignmentCount -
-          this.velocities[offset + 2]) *
-        school.alignmentWeight;
+    const latched = this.directLatch[index] === 1;
+    const enteredDirect = latched && !wasLatched;
+
+    this.panicHold[index] = Math.max(0, this.panicHold[index] - dt);
+    this.refractory[index] = Math.max(0, this.refractory[index] - dt);
+
+    // 社会触发：收到的脉冲够强、自己没被直接威胁闩住、且不在不应期内。
+    // 不应期是关键 —— 没有它，脉冲会在鱼群里来回反射永不停止。
+    let emitPulse = enteredDirect;
+    if (
+      !latched &&
+      this.heardSignal[index] >= relations.signalThreshold &&
+      this.refractory[index] <= 0
+    ) {
+      emitPulse = true;
+      this.refractory[index] = relations.refractoryTime;
+    }
+    if (emitPulse) this.panicHold[index] = relations.holdTime;
+    if (enteredDirect) {
+      this.refractory[index] = Math.max(
+        this.refractory[index],
+        relations.refractoryTime
+      );
     }
 
-    const threatened = this.threatCounts[index] > 0;
+    // 惊吓期间恐慌被【钉在满值】，这才有四散而逃
+    const panicTarget = Math.max(latched ? threat : 0, this.panicHold[index] > 0 ? 1 : 0);
+    const rising = panicTarget > this.panic[index];
     this.panic[index] = approach(
       this.panic[index],
-      threatened ? this.config.relations.directThreatPanic : 0,
-      threatened
-        ? this.config.relations.panicRiseRate
-        : this.config.relations.panicDecayRate,
+      panicTarget,
+      rising ? relations.panicRiseRate : relations.panicDecayRate,
       dt
     );
-    if (threatened) {
-      fx += this.evadeForces[offset] * this.config.relations.evadeWeight;
-      fy +=
-        this.evadeForces[offset + 1] * this.config.relations.evadeWeight;
-      fz +=
-        this.evadeForces[offset + 2] * this.config.relations.evadeWeight;
+    this.alarm[index] = emitPulse
+      ? 1
+      : this.alarm[index] *
+        Math.exp(-dt / Math.max(relations.signalDecayTime, 1e-6));
+    const panic = this.panic[index];
+    // 受惊时凝聚力下降 —— flash expansion（原版验证过的方向）。
+    // 同步不靠放大 alignmentWeight，而靠下面独立的应急对齐通道。
+    // 冲刺时压低社交权重（而不是把追击力放大 10 倍）。捕食者会"脱队扑食"，
+    // 但整体力量级不变，运动仍然平滑；松开后自己归队。
+    const lockedOn =
+      this.pursuitTargets[index] >= 0 && this.alive[this.pursuitTargets[index]];
+    const socialScale = lockedOn
+      ? this.config.locomotion.burstSocialSuppression
+      : 1;
+    // 体型越大越倾向个体行动：社群权重按 size^-exponent 衰减。
+    // 真实生态里小鱼靠成群反捕食，大鱼基本独来独往。
+    const sizeSocial = Math.pow(
+      Math.max(school.size, EPSILON),
+      -this.config.perception.socialSizeExponent
+    );
+    const cohesionWeight =
+      school.cohesionWeight *
+      Math.max(0, 1 - panic * relations.cohesionDrop) *
+      socialScale *
+      sizeSocial;
+    // 接收方增益：自己越慌，越会去听邻居 —— 波才能一层层推下去
+    const receiverBoost = Math.min(
+      1 + relations.alignmentReceiverBoost * this.neighborPanic[index],
+      relations.alignmentReceiverMax
+    );
+    const alignmentWeight =
+      school.alignmentWeight * receiverBoost * socialScale * sizeSocial;
+
+    const vx = this.velocities[offset];
+    const vy = this.velocities[offset + 1];
+    const vz = this.velocities[offset + 2];
+    const ruleMaxSpeed = school.maxSpeed;
+    const ruleMaxForce = this.config.locomotion.maxForce;
+    let fx = 0;
+    let fy = 0;
+    let fz = 0;
+    const applyRule = (dxr, dyr, dzr, weight) => {
+      if (weight === 0) return;
+      steerToward(
+        dxr,
+        dyr,
+        dzr,
+        vx,
+        vy,
+        vz,
+        ruleMaxSpeed,
+        ruleMaxForce,
+        STEER_SCRATCH
+      );
+      fx += STEER_SCRATCH[0] * weight;
+      fy += STEER_SCRATCH[1] * weight;
+      fz += STEER_SCRATCH[2] * weight;
+    };
+
+    // 分离在恐慌时用更高的 safetySpeed —— 逃窜中互相让位的力更强
+    const safetySpeed = ruleMaxSpeed * (1 + 0.25 * panic);
+    steerToward(
+      this.separation[offset],
+      this.separation[offset + 1],
+      this.separation[offset + 2],
+      vx,
+      vy,
+      vz,
+      safetySpeed,
+      ruleMaxForce,
+      STEER_SCRATCH
+    );
+    fx += STEER_SCRATCH[0] * school.separationWeight;
+    fy += STEER_SCRATCH[1] * school.separationWeight;
+    fz += STEER_SCRATCH[2] * school.separationWeight;
+    if (cohesionCount > 0) {
+      applyRule(
+        this.cohesionSums[offset] / cohesionCount - this.positions[offset],
+        this.cohesionSums[offset + 1] / cohesionCount -
+          this.positions[offset + 1],
+        this.cohesionSums[offset + 2] / cohesionCount -
+          this.positions[offset + 2],
+        cohesionWeight
+      );
+    }
+    if (alignmentCount > 0) {
+      applyRule(
+        this.alignmentSums[offset] / alignmentCount,
+        this.alignmentSums[offset + 1] / alignmentCount,
+        this.alignmentSums[offset + 2] / alignmentCount,
+        alignmentWeight
+      );
+    }
+
+    // 逃逸方向：自己看见了就用自己的，没看见就用邻居传来的。
+    // 这样没看见捕食者的鱼也会跟着整群一起转向。
+    // 原版设计声明：只有【直接】感知到捕食者的鱼才获得几何逃逸向量。
+    // 社会性恐慌的鱼只知道邻居的航向，不知道捕食者的位置 —— 否则等于全知。
+    const ex = this.evadeForces[offset];
+    const ey = this.evadeForces[offset + 1];
+    const ez = this.evadeForces[offset + 2];
+    const escapeMagnitude = Math.hypot(ex, ey, ez);
+    if (escapeMagnitude > EPSILON) {
+      const inverseEscape = 1 / escapeMagnitude;
+      this.escapeDir[offset] = ex * inverseEscape;
+      this.escapeDir[offset + 1] = ey * inverseEscape;
+      this.escapeDir[offset + 2] = ez * inverseEscape;
+    } else {
+      this.escapeDir[offset] = 0;
+      this.escapeDir[offset + 1] = 0;
+      this.escapeDir[offset + 2] = 0;
+    }
+    // 应急对齐：一条鱼看见危险，它的航向会压过二十条镇定邻居的平均值。
+    // 这是惊扰波真正的载体。
+    if (this.emergencyUrgency[index] > 0) {
+      const emergency = normalize3(
+        this.emergencyAlign[offset],
+        this.emergencyAlign[offset + 1],
+        this.emergencyAlign[offset + 2]
+      );
+      applyRule(
+        emergency[0],
+        emergency[1],
+        emergency[2],
+        relations.emergencyAlignmentWeight * this.emergencyUrgency[index]
+      );
+    }
+
+    // 逃逸强度随恐慌连续变化，不再是"看见/没看见"的开关
+    const directThreat = this.threatLevel[index];
+    const threatened = panic > relations.panicMinTrigger;
+    if (directThreat > 0) {
+      applyRule(
+        this.escapeDir[offset],
+        this.escapeDir[offset + 1],
+        this.escapeDir[offset + 2],
+        relations.evadeWeight * directThreat
+      );
     }
 
     const localPredationCount = this.predationCounts[index];
     if (localPredationCount > 0) {
-      fx +=
-        (this.predationSums[offset] / localPredationCount -
-          this.positions[offset]) *
-        this.config.relations.pursuitWeight;
-      fy +=
-        (this.predationSums[offset + 1] / localPredationCount -
-          this.positions[offset + 1]) *
-        this.config.relations.pursuitWeight;
-      fz +=
-        (this.predationSums[offset + 2] / localPredationCount -
-          this.positions[offset + 2]) *
-        this.config.relations.pursuitWeight;
+      applyRule(
+        this.predationSums[offset] / localPredationCount -
+          this.positions[offset],
+        this.predationSums[offset + 1] / localPredationCount -
+          this.positions[offset + 1],
+        this.predationSums[offset + 2] / localPredationCount -
+          this.positions[offset + 2],
+        this.config.relations.pursuitWeight
+      );
     }
 
     const target = this.pursuitTargets[index];
@@ -848,16 +1317,34 @@ export class ExperimentSimulation {
         iy - this.positions[offset + 1],
         iz - this.positions[offset + 2]
       );
-      const weight = this.config.relations.burstWeight;
-      fx += pursuit[0] * weight;
-      fy += pursuit[1] * weight;
-      fz += pursuit[2] * weight;
+      // 冲刺追击也走归一化转向。原来是裸力 ×10，量级是其它所有规则总和的
+      // 2 倍以上，且不减速度、不钳 maxForce —— 锁定目标的鱼等于脱离了鱼群，
+      // 这就是多群下"像离子对撞"的直接来源。
+      applyRule(
+        pursuit[0],
+        pursuit[1],
+        pursuit[2],
+        this.config.relations.burstWeight
+      );
     }
 
+    // 边界力的【量级】就是紧急度（软斜坡 0..1）。steerToward 会 normalize
+    // 方向，所以必须把斜坡量级作为权重带回来，否则一进边界区就吃满力、硬弹。
     const boundary = this._boundaryForce(index);
-    fx += boundary[0] * this.config.locomotion.boundaryWeight;
-    fy += boundary[1] * this.config.locomotion.boundaryWeight;
-    fz += boundary[2] * this.config.locomotion.boundaryWeight;
+    const boundaryUrgency = Math.min(
+      1,
+      Math.hypot(boundary[0], boundary[1], boundary[2])
+    );
+    if (boundaryUrgency > EPSILON) {
+      applyRule(
+        boundary[0],
+        boundary[1],
+        boundary[2],
+        this.config.locomotion.boundaryWeight *
+          boundaryUrgency *
+          (1 + boundaryUrgency * 2)
+      );
+    }
 
     const point = [
       this.positions[offset],
@@ -896,7 +1383,7 @@ export class ExperimentSimulation {
       fz += this.avoidanceDirections[offset + 2] * weight;
     }
 
-    this.wanderPhases[index] += dt * (0.7 + (index % 13) * 0.017);
+    this.wanderPhases[index] += dt * this.wanderRates[index];
     const phase = this.wanderPhases[index];
     fx += Math.sin(phase * 1.31) * this.config.locomotion.wanderWeight;
     fy += Math.sin(phase * 1.73 + 2.1) * this.config.locomotion.wanderWeight;
@@ -915,10 +1402,12 @@ export class ExperimentSimulation {
     }
 
     const force = normalize3(fx, fy, fz);
+    // 冲刺时给一点额外力预算即可。原来是 ×burstWeight(10)，
+    // 直接把总力钳制从 5.2 抬到 52，等于取消了钳制。
     const forceBudget =
       target >= 0 && this.alive[target]
         ? this.config.locomotion.maxForce *
-          Math.max(1, this.config.relations.burstWeight)
+          this.config.locomotion.burstForceBudget
         : this.config.locomotion.maxForce;
     const forceMagnitude = Math.min(
       forceBudget,
@@ -940,16 +1429,33 @@ export class ExperimentSimulation {
       1
     );
     const angle = Math.acos(dot);
-    const turnSpeed = effectiveTurnSpeed(this.config, school);
+    // 冲刺中转向能力大幅下降：猎物一躲，捕食者会冲过头再绕回来。
+    // 直接用本帧的锁定状态，避免读到上一帧的 locomotionStates。
+    const burstingNow = target >= 0 && this.alive[target];
+    const turnSpeed =
+      effectiveTurnSpeed(this.config, school) *
+      (burstingNow ? this.config.locomotion.burstTurnFactor : 1) *
+      (1 + this.panic[index] * this.config.relations.panicTurnBoost);
     const turnAlpha =
       angle <= EPSILON
         ? 1
         : Math.min(1, (turnSpeed * dt) / angle);
-    const turned = normalize3(
+    let turned = normalize3(
       oldDirection[0] * (1 - turnAlpha) + nextDirection[0] * turnAlpha,
       oldDirection[1] * (1 - turnAlpha) + nextDirection[1] * turnAlpha,
       oldDirection[2] * (1 - turnAlpha) + nextDirection[2] * turnAlpha
     );
+    // 俯仰钳制：鱼不像潜艇那样垂直上下游。没有这条，逃窜时会直上直下。
+    const maxPitch = (this.config.locomotion.maxPitchDegrees * Math.PI) / 180;
+    const horizontal = Math.hypot(turned[0], turned[2]);
+    const pitch = Math.atan2(turned[1], Math.max(horizontal, EPSILON));
+    if (Math.abs(pitch) > maxPitch) {
+      turned = normalize3(
+        turned[0],
+        Math.max(horizontal, EPSILON) * Math.tan(Math.sign(pitch) * maxPitch),
+        turned[2]
+      );
+    }
     let desiredSpeed = nextDirection[3];
     const cruiseSpeed =
       school.cruiseSpeed * sustainedSpeedScale(this.config, school);
@@ -1000,6 +1506,44 @@ export class ExperimentSimulation {
     return count;
   }
 
+  /** 浮尸缓慢上浮到水面并停在那里。 */
+  _floatCorpses(dt) {
+    const rise = Math.max(0, this.config.ecology.corpseRiseSpeed ?? 0.06);
+    const fade = Math.max(
+      0.01,
+      this.config.ecology.corpseFadeTime ?? 1.6
+    );
+    const drag = Math.max(0, this.config.ecology.corpseDrag ?? 2.4);
+    const margin = this.config.tank.wallMargin;
+    const half = [
+      this.config.tank.width / 2 - margin,
+      this.config.tank.height / 2 - margin,
+      this.config.tank.depth / 2 - margin,
+    ];
+    for (let index = 0; index < this.count; index += 1) {
+      if (!this.corpse[index]) continue;
+      this.corpseAge[index] += dt;
+      const t = Math.min(1, this.corpseAge[index] / fade);
+      const offset = index * 3;
+      // 残余动量指数衰减 —— 滑行一段后停住
+      const damping = Math.exp(-drag * dt);
+      this.velocities[offset] *= damping;
+      this.velocities[offset + 1] *= damping;
+      this.velocities[offset + 2] *= damping;
+      // 上浮渐入：刚死时几乎不动，随渐变推进逐渐浮起
+      const vy = this.velocities[offset + 1] + rise * t;
+      this.positions[offset] += this.velocities[offset] * dt;
+      this.positions[offset + 1] += vy * dt;
+      this.positions[offset + 2] += this.velocities[offset + 2] * dt;
+      for (let axis = 0; axis < 3; axis += 1) {
+        const limit = half[axis];
+        const value = this.positions[offset + axis];
+        if (value > limit) this.positions[offset + axis] = limit;
+        else if (value < -limit) this.positions[offset + axis] = -limit;
+      }
+    }
+  }
+
   _killFish(index, reason) {
     if (!this.alive[index]) return false;
     this.alive[index] = 0;
@@ -1008,26 +1552,38 @@ export class ExperimentSimulation {
       this.deathCounts[schoolIndex].captured += 1;
     } else if (reason === 'starved') {
       this.deathCounts[schoolIndex].starved += 1;
-      if (this.config.ecology.starvationVfxEnabled) {
-        const offset = index * 3;
-        const position = new THREE.Vector3(
-          this.positions[offset],
-          this.positions[offset + 1],
-          this.positions[offset + 2]
-        );
-        const floorY =
-          -this.config.tank.height / 2 + this.config.tank.wallMargin;
-        this.captureVfx?.emitStarvation(position, { floorY });
-      }
+      // 尸体不再是碎屑粒子，而是鱼模型本身：留在原地、变灰、缓慢上浮到水面。
+      // 真实的死鱼因鱼鳔残气多半是浮起来的。
+      this.corpse[index] = 1;
+      this.corpseAge[index] = 0;
+      // 不清零速度 —— 让它带着原来的动量滑行一段再停，死亡才有过程感
     }
     return true;
   }
 
   _updateEcology(dt) {
     if (!this.config.ecology?.enabled) return;
-    // Plankton is retired as a food source. Brown starvation corpses are the
-    // only passive forage: fish with grazeRate > 0 eat nearby fragments.
-    this.planktonLevel = 0;
+    // 浮游生物重新启用：logistic 再生的场模型。浮尸能量更高，所以
+    // 觅食时先找浮尸，没有才吃浮游。
+    if (this.config.plankton.enabled) {
+      const stepped = stepPlankton({
+        level: this.planktonLevel,
+        capacity: this.config.plankton.capacity,
+        growthRate: this.config.plankton.growthRate,
+        requestedConsumption: 0,
+        halfSaturation:
+          this.config.plankton.capacity *
+          this.config.plankton.halfSaturationFraction,
+        dt,
+      });
+      // 下限：logistic 在 level=0 时 growth=0，一旦吃光就永不恢复。
+      const floorLevel =
+        this.config.plankton.capacity *
+        (this.config.plankton.minFraction ?? 0.01);
+      this.planktonLevel = Math.max(floorLevel, stepped.level ?? stepped);
+    } else {
+      this.planktonLevel = 0;
+    }
     this._syncPlanktonVisual();
 
     const carrionEnergy = Math.max(
@@ -1039,31 +1595,106 @@ export class ExperimentSimulation {
       this.config.ecology.carrionRadius ?? 0.08
     );
     let carrionEaten = 0;
-    if (this.captureVfx && carrionEnergy > 0 && carrionRadius > 0) {
-      for (let index = 0; index < this.count; index += 1) {
-        if (!this.alive[index]) continue;
-        const school = this.config.schools[this.schoolIds[index]];
-        if (!(school.grazeRate > 0)) continue;
-        // Probabilistic graze attempts scale with grazeRate; each success
-        // consumes one corpse fragment for a fixed energy packet.
-        const attemptChance = Math.min(1, school.grazeRate * dt * 4);
-        if (this.rng.next() > attemptChance) continue;
-        const offset = index * 3;
-        const position = new THREE.Vector3(
-          this.positions[offset],
-          this.positions[offset + 1],
-          this.positions[offset + 2]
-        );
-        if (this.captureVfx.consumeNearestStarvation(position, carrionRadius)) {
-          this.energy[index] = Math.min(
-            this.config.ecology.energyCapacity,
-            this.energy[index] + carrionEnergy * school.grazeRate
-          );
-          carrionEaten += 1;
+    const shareFraction = clamp(
+      this.config.ecology.energyShareFraction ?? 0,
+      0,
+      1
+    );
+    const forageMul = this.config.ecology.forageEnergyMultiplier ?? 1;
+    const planktonEnergy = Math.max(
+      0,
+      this.config.ecology.planktonEnergy ?? 0.06
+    );
+    const capacityLimit = this.config.ecology.energyCapacity;
+    const planktonOn =
+      this.config.plankton.enabled && this.planktonLevel > 0;
+
+    for (let index = 0; index < this.count; index += 1) {
+      if (!this.alive[index]) continue;
+      const schoolIndex = this.schoolIds[index];
+      const school = this.config.schools[schoolIndex];
+      if (!(school.grazeRate > 0)) continue;
+      // 【优先吃鱼】正在锁定猎物的鱼不觅食。中群/大群几乎总在追猎，
+      // 所以主动吃浮游的概率天然最低；小群从不追猎（体型比落在 evade 侧），
+      // 所以它只能靠浮游和浮尸。
+      if (this.pursuitTargets[index] >= 0) continue;
+      // 【饥饿门控】吃饱了就不吃。这一条是浮游可持续的关键：
+      // 无约束觅食是 64/s 消耗 vs 18/s 再生（几秒吃光且 level=0 后永不恢复）；
+      // 只在能量低于阈值时进食，系统自动收敛到约 4/s，有 4.5 倍余量。
+      const hungerGate =
+        capacityLimit * (this.config.ecology.grazeHungerRatio ?? 0.8);
+      if (this.energy[index] >= hungerGate) continue;
+      const attemptChance = Math.min(1, school.grazeRate * dt * 4);
+      if (this.rng.next() > attemptChance) continue;
+
+      const offset = index * 3;
+      let gain = 0;
+      let ate = false;
+
+      // 先找浮尸（能量高），没有再吃浮游
+      let corpseTarget = -1;
+      let bestDistance2 = carrionRadius * carrionRadius;
+      for (let other = 0; other < this.count; other += 1) {
+        if (!this.corpse[other]) continue;
+        const oo = other * 3;
+        const dx = this.positions[oo] - this.positions[offset];
+        const dy = this.positions[oo + 1] - this.positions[offset + 1];
+        const dz = this.positions[oo + 2] - this.positions[offset + 2];
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestDistance2) {
+          bestDistance2 = d2;
+          corpseTarget = other;
         }
       }
+      if (corpseTarget >= 0) {
+        this.corpse[corpseTarget] = 0;
+        gain = carrionEnergy * school.grazeRate * forageMul;
+        ate = true;
+        carrionEaten += 1;
+      } else if (planktonOn) {
+        const intake = Math.min(
+          this.planktonLevel,
+          this.config.plankton.maxIntakePerFish
+        );
+        if (intake > 0) {
+          this.planktonLevel -= intake;
+          this.planktonConsumed += intake;
+          // grazeRate 决定转化效率：小鱼大幅恢复，大鱼几乎没用
+          gain = planktonEnergy * school.grazeRate * forageMul;
+          ate = true;
+        }
+      }
+
+      if (!ate || gain <= 0) continue;
+      this.energyPools[schoolIndex] += gain * shareFraction;
+      this.energy[index] = Math.min(
+        capacityLimit,
+        this.energy[index] + gain * (1 - shareFraction)
+      );
+      // 进食特效
+      this.captureVfx?.emitFeed?.(
+        this.positions[offset],
+        this.positions[offset + 1],
+        this.positions[offset + 2]
+      );
     }
     this.planktonConsumed += carrionEaten;
+
+    // 分发共享池：按各族存活数平均。超出容量的部分丢弃（不累积到下一帧）。
+    const capacity = this.config.ecology.energyCapacity;
+    const perFishShare = this.energyPools.map((pool, schoolIndex) => {
+      if (!(pool > 0)) return 0;
+      const alive = this._activeSchoolCount(schoolIndex);
+      return alive > 0 ? pool / alive : 0;
+    });
+    this.energyPools.fill(0);
+    for (let index = 0; index < this.count; index += 1) {
+      if (!this.alive[index]) continue;
+      const bonus = perFishShare[this.schoolIds[index]];
+      if (bonus > 0) {
+        this.energy[index] = Math.min(capacity, this.energy[index] + bonus);
+      }
+    }
 
     const starved = [];
     for (let index = 0; index < this.count; index += 1) {
@@ -1082,6 +1713,7 @@ export class ExperimentSimulation {
       if (this.energy[index] <= 0) starved.push(index);
     }
     for (const index of starved) this._killFish(index, 'starved');
+    this._floatCorpses(dt);
     if (this.config.runtime.mode === 'ecology') {
       const aliveCounts = this.config.schools.map((_, schoolIndex) =>
         this._activeSchoolCount(schoolIndex)
@@ -1151,16 +1783,24 @@ export class ExperimentSimulation {
       this._killFish(prey, 'captured');
       this.metricsState.captures += 1;
       if (this.config.ecology?.enabled) {
+        const captureGain =
+          this.config.ecology.captureEnergyPerSize *
+          this.config.schools[preySchool].size;
+        const captureShare = clamp(
+          this.config.ecology.energyShareFraction ?? 0,
+          0,
+          1
+        );
+        this.energyPools[predatorSchool] += captureGain * captureShare;
         this.energy[predator] = Math.min(
           this.config.ecology.energyCapacity,
-          this.energy[predator] +
-            this.config.ecology.captureEnergyPerSize *
-              this.config.schools[preySchool].size
+          this.energy[predator] + captureGain * (1 - captureShare)
         );
       }
       this.cooldowns[predator] = perPredatorCooldown(
         this._activeSchoolCount(predatorSchool),
-        this.config.capture.targetCaptureRate
+        this.config.capture.targetCaptureRate,
+        this.config.schools[predatorSchool].cruiseSpeed / 0.23
       );
     }
   }
@@ -1217,6 +1857,8 @@ export class ExperimentSimulation {
     const matrix = new THREE.Matrix4();
     const position = new THREE.Vector3();
     const quaternion = new THREE.Quaternion();
+    const rollQuaternion = new THREE.Quaternion();
+    const corpseTint = new THREE.Color();
     const scale = new THREE.Vector3();
     const direction = new THREE.Vector3();
     for (let index = 0; index < this.count; index += 1) {
@@ -1226,9 +1868,45 @@ export class ExperimentSimulation {
         this.positions[offset + 1],
         this.positions[offset + 2]
       );
-      if (!this.alive[index] || index === this.hiddenFish) {
+      if (index === this.hiddenFish) {
         scale.setScalar(0);
         quaternion.identity();
+      } else if (!this.alive[index]) {
+        // 浮尸：保留鱼模型，肚皮朝上，灰色
+        if (this.corpse[index]) {
+          const schoolIndex = this.schoolIds[index];
+          const school = this.config.schools[schoolIndex];
+          // 尺寸就是鱼自身的体型
+          scale.setScalar(school.size);
+          const fade = Math.max(
+            0.01,
+            this.config.ecology.corpseFadeTime ?? 1.6
+          );
+          const t = clamp(this.corpseAge[index] / fade, 0, 1);
+          // 逐渐翻身：从死亡时的朝向平滑转到肚皮朝上
+          direction
+            .set(
+              this.prevHeadings[offset],
+              this.prevHeadings[offset + 1],
+              this.prevHeadings[offset + 2]
+            )
+            .normalize();
+          if (direction.lengthSq() <= EPSILON) direction.copy(FORWARD);
+          quaternion.setFromUnitVectors(FORWARD, direction);
+          rollQuaternion.setFromAxisAngle(FORWARD, Math.PI * t);
+          quaternion.multiply(rollQuaternion);
+          // 颜色渐变：本族颜色 → 灰
+          if (this.mesh.instanceColor) {
+            corpseTint
+              .copy(this.schoolColors[schoolIndex])
+              .lerp(this.corpseColor, t);
+            this.mesh.setColorAt(index, corpseTint);
+            this._instanceColorDirty = true;
+          }
+        } else {
+          scale.setScalar(0);
+          quaternion.identity();
+        }
       } else {
         const school = this.config.schools[this.schoolIds[index]];
         scale.setScalar(school.size);
@@ -1240,12 +1918,37 @@ export class ExperimentSimulation {
           )
           .normalize();
         if (direction.lengthSq() <= EPSILON) direction.copy(FORWARD);
+        // --- 侧倾（banking）：转弯时鱼体侧过来 ---
+        // 用上一帧与本帧朝向的叉积估转向率；其竖直分量就是水平转向的方向。
+        const visual = this.config.visual;
+        const px = this.prevHeadings[offset];
+        const py = this.prevHeadings[offset + 1];
+        const pz = this.prevHeadings[offset + 2];
+        let targetRoll = 0;
+        if (px !== 0 || py !== 0 || pz !== 0) {
+          const yawRate = pz * direction.x - px * direction.z;
+          const maxRoll = (visual.maxRollDegrees * Math.PI) / 180;
+          targetRoll = clamp(yawRate * visual.bankingGain, -maxRoll, maxRoll);
+        }
+        this.rollAngles[index] +=
+          (targetRoll - this.rollAngles[index]) * visual.bankingSmoothing;
+        this.prevHeadings[offset] = direction.x;
+        this.prevHeadings[offset + 1] = direction.y;
+        this.prevHeadings[offset + 2] = direction.z;
         quaternion.setFromUnitVectors(FORWARD, direction);
+        if (Math.abs(this.rollAngles[index]) > 1e-4) {
+          rollQuaternion.setFromAxisAngle(FORWARD, this.rollAngles[index]);
+          quaternion.multiply(rollQuaternion);
+        }
       }
       matrix.compose(position, quaternion, scale);
       this.mesh.setMatrixAt(index, matrix);
     }
     this.mesh.instanceMatrix.needsUpdate = true;
+    if (this._instanceColorDirty && this.mesh.instanceColor) {
+      this.mesh.instanceColor.needsUpdate = true;
+      this._instanceColorDirty = false;
+    }
   }
 
   averageNeighbors(schoolIndex) {

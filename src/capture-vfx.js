@@ -67,6 +67,9 @@ export class CaptureVfx {
     this.scene = scene;
     this.params = params;
     this.starvationParams = starvationParams || DEFAULT_STARVATION_VFX;
+    // 缸体半尺寸。尸体原来只钳制 y（floorY），x/z 完全不管 —— 带着初速度
+    // 就直接飘出侧壁了。null = 不限制（测试路径）。
+    this.bounds = null;
     this.particles = [];
     this.glows = [];
     this._nextBurstId = 1;
@@ -299,6 +302,63 @@ export class CaptureVfx {
     }
   }
 
+  /** 设置缸体半尺寸 [hx, hy, hz]，用于把碎屑限制在缸内。 */
+  setBounds(half) {
+    this.bounds =
+      Array.isArray(half) && half.length === 3 && half.every(Number.isFinite)
+        ? half.slice()
+        : null;
+  }
+
+  /** 把位置钳制进缸内（尸体不该穿出玻璃）。 */
+  _clampToTank(vec) {
+    if (!this.bounds) return vec;
+    const margin = nonNegative(this.starvationParams?.wallMargin, 0.01);
+    const hx = Math.max(0, this.bounds[0] - margin);
+    const hy = Math.max(0, this.bounds[1] - margin);
+    const hz = Math.max(0, this.bounds[2] - margin);
+    vec.x = Math.min(hx, Math.max(-hx, vec.x));
+    vec.y = Math.min(hy, Math.max(-hy, vec.y));
+    vec.z = Math.min(hz, Math.max(-hz, vec.z));
+    return vec;
+  }
+
+  /** 进食特效：一小簇向上飘散的浅色碎屑。 */
+  /** 粒子上限保护。 */
+  _trim() {
+    const cap = Math.max(32, Math.round(nonNegative(this.params?.maxParticles, 600)));
+    if (this.particles.length > cap) {
+      this.particles.splice(0, this.particles.length - cap);
+    }
+  }
+
+  emitFeed(x, y, z) {
+    const P = this.params || {};
+    if (P.feedEnabled === false) return;
+    const count = Math.max(1, Math.round(nonNegative(P.feedParticles, 3)));
+    const speed = nonNegative(P.feedSpeed, 0.12);
+    const size = nonNegative(P.feedSize, 0.009);
+    const lifetime = nonNegative(P.feedLifetime, 0.32);
+    for (let i = 0; i < count; i += 1) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      this.particles.push({
+        age: 0,
+        lifetime,
+        size,
+        origin: new THREE.Vector3(x, y, z),
+        initialVelocity: new THREE.Vector3(
+          Math.sin(phi) * Math.cos(theta) * speed,
+          Math.abs(Math.cos(phi)) * speed + speed * 0.4,
+          Math.sin(phi) * Math.sin(theta) * speed
+        ),
+        color: P.feedColor || '#dcf1e6',
+        style: 'feed',
+      });
+    }
+    this._trim();
+  }
+
   _writeMatrices() {
     for (let i = 0; i < this.particles.length; i++) {
       const particle = this.particles[i];
@@ -319,6 +379,7 @@ export class CaptureVfx {
         if (Number.isFinite(particle.floorY)) {
           _position.y = Math.max(particle.floorY, _position.y);
         }
+        this._clampToTank(_position);
         _scale.setScalar(particle.size);
       } else {
         const age = Math.min(particle.age, particle.lifetime);
@@ -331,7 +392,7 @@ export class CaptureVfx {
         _scale.setScalar(particle.size * speedRatio);
       }
       _matrix.makeScale(_scale.x, _scale.y, _scale.z);
-      _matrix.setPosition(_position);
+      _matrix.setPosition(this._clampToTank(_position));
       this.mesh.setMatrixAt(i, _matrix);
       this._color.set(particle.color || '#1e4f8c');
       this.mesh.setColorAt(i, this._color);
@@ -357,6 +418,7 @@ export class CaptureVfx {
       if (Number.isFinite(particle.floorY)) {
         out.y = Math.max(particle.floorY, out.y);
       }
+      this._clampToTank(out);
       return out;
     }
     const age = Math.min(particle.age, particle.lifetime);
