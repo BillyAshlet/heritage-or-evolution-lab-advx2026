@@ -145,6 +145,7 @@ const COPY = Object.freeze({
 
 const SWEEP_SCREENS = new Set(VISITOR_OWNED_SCREENS);
 const FX_RING_RADIUS = 90;
+const TITLE_FISH_DETECTION_RADIUS = 900;
 const FX_PUSH_REACH = 3;
 const FX_MAX_PUSH = 12;
 const FX_DAMP = 0.16;
@@ -295,13 +296,12 @@ function prefersReducedMotion() {
   );
 }
 
-function setupVariableProximity(overlay, targets) {
-  if (prefersReducedMotion()) return () => {};
+function setupVariableProximity(overlay, targets, pointerFollower = null) {
   const list = targets.map((target) => ({
     ...target,
     spans: [...target.element.querySelectorAll('.vo-blur-word')],
   }));
-  if (!list.length) return () => {};
+  if (!list.length && !pointerFollower) return () => {};
 
   const ring = document.createElement('div');
   ring.className = 'vo-cursor-ring';
@@ -322,6 +322,7 @@ function setupVariableProximity(overlay, targets) {
     ring.style.transform =
       `translate(${cursor.x - FX_RING_RADIUS}px, ${cursor.y - FX_RING_RADIUS}px)`;
     ring.classList.add('vo-cursor-ring--on');
+    pointerFollower?.setCohesionPointer?.(cursor.x, cursor.y, true);
 
     for (const { element, fromWeight, toWeight, spans } of list) {
       if (!element.isConnected) continue;
@@ -377,6 +378,7 @@ function setupVariableProximity(overlay, targets) {
   const onLeave = () => {
     hasMouse = false;
     ring.classList.remove('vo-cursor-ring--on');
+    pointerFollower?.clearCohesionPointer?.();
   };
 
   window.addEventListener('mousemove', onMove);
@@ -386,6 +388,7 @@ function setupVariableProximity(overlay, targets) {
 
   return () => {
     cancelAnimationFrame(raf);
+    pointerFollower?.clearCohesionPointer?.();
     window.removeEventListener('mousemove', onMove);
     document.documentElement.removeEventListener('mouseleave', onLeave);
     window.removeEventListener('blur', onLeave);
@@ -458,27 +461,28 @@ function blurSplitElement(element, {
   [...element.childNodes].forEach(process);
 }
 
-function applyTextEffects(overlay) {
-  if (prefersReducedMotion()) return () => {};
+function applyTextEffects(overlay, pointerFollower = null) {
   const targets = [];
-  overlay.querySelectorAll('[data-fx]').forEach((element) => {
-    const animateBy = element.dataset.fx === 'words' ? 'words' : 'letters';
-    const fromWeight = Number(element.dataset.fxFrom ?? 350);
-    blurSplitElement(element, {
-      animateBy,
-      delay: Number(
-        element.dataset.fxDelay ?? (animateBy === 'words' ? 18 : 40),
-      ),
-      direction: element.dataset.fxDir ?? 'bottom',
-      baseWeight: fromWeight,
+  if (!prefersReducedMotion()) {
+    overlay.querySelectorAll('[data-fx]').forEach((element) => {
+      const animateBy = element.dataset.fx === 'words' ? 'words' : 'letters';
+      const fromWeight = Number(element.dataset.fxFrom ?? 350);
+      blurSplitElement(element, {
+        animateBy,
+        delay: Number(
+          element.dataset.fxDelay ?? (animateBy === 'words' ? 18 : 40),
+        ),
+        direction: element.dataset.fxDir ?? 'bottom',
+        baseWeight: fromWeight,
+      });
+      targets.push({
+        element,
+        fromWeight,
+        toWeight: Number(element.dataset.fxTo ?? 800),
+      });
     });
-    targets.push({
-      element,
-      fromWeight,
-      toWeight: Number(element.dataset.fxTo ?? 800),
-    });
-  });
-  return setupVariableProximity(overlay, targets);
+  }
+  return setupVariableProximity(overlay, targets, pointerFollower);
 }
 
 function wireMediaFallback(overlay) {
@@ -519,6 +523,7 @@ export function mountVisitorMode({
   let screen = VISITOR_SCREEN.HIDDEN;
   let cutsceneLevelIndex = 0;
   let effectCleanup = () => {};
+  let titleFishHandle = null;
   let titleFishCleanup = () => {};
   let dismissTimer = 0;
   let disposed = false;
@@ -600,10 +605,12 @@ export function mountVisitorMode({
     if (fishCanvas) {
       const handle = mountTitleFish(fishCanvas, {
         count: 16,
-        cohesionRadius: FX_RING_RADIUS,
+        cohesionRadius: TITLE_FISH_DETECTION_RADIUS,
       });
+      titleFishHandle = handle;
       titleFishCleanup = () => {
         handle?.dispose?.();
+        if (titleFishHandle === handle) titleFishHandle = null;
         titleFishCleanup = () => {};
       };
     }
@@ -748,7 +755,7 @@ export function mountVisitorMode({
     }
 
     wireMediaFallback(overlay);
-    effectCleanup = applyTextEffects(overlay);
+    effectCleanup = applyTextEffects(overlay, titleFishHandle);
     const content = overlay.firstElementChild;
     if (outgoing) {
       // Era change: composite ring wipe instead of the plain conic sweep.
