@@ -377,6 +377,9 @@
   object-fit: cover;
   z-index: -2;
   opacity: 0.5;
+  /* Flipped vertically: puts each clip's dark half behind the text
+     column and its detail in the lower field, away from the copy. */
+  transform: scaleY(-1);
 }
 /* Bright-tone levels (L2 golden age): let the footage actually shine.
    The scrim collapses to a left-edge wedge — dark enough behind the
