@@ -734,7 +734,7 @@ export function createExperimentDebug({
         metrics.project === 'ecology' || metrics.project === 'aquarium'
           ? `
 
-plankton=${metrics.ecology.plankton.level.toFixed(1)}/${metrics.ecology.plankton.capacity.toFixed(0)} consumed=${metrics.ecology.plankton.consumed.toFixed(1)}` +
+carrion=${metrics.ecology.plankton.level.toFixed(0)} eaten=${metrics.ecology.plankton.consumed.toFixed(0)}` +
             (metrics.project === 'ecology'
               ? `
 outcome=${metrics.ecology.state}${metrics.ecology.winnerName ? ` winner=${metrics.ecology.winnerName}` : ''}`

@@ -1009,45 +1009,50 @@ export class ExperimentSimulation {
 
   _updateEcology(dt) {
     if (!this.config.ecology?.enabled) return;
-    const plankton = this.config.plankton;
-    const capacity = plankton.capacity;
-    const halfSaturation =
-      capacity * plankton.halfSaturationFraction;
-    const availability =
-      plankton.enabled && this.planktonLevel > 0
-        ? this.planktonLevel /
-          Math.max(EPSILON, this.planktonLevel + halfSaturation)
-        : 0;
-    let requestedConsumption = 0;
-    for (let index = 0; index < this.count; index += 1) {
-      if (!this.alive[index]) continue;
-      const school = this.config.schools[this.schoolIds[index]];
-      requestedConsumption +=
-        school.grazeRate *
-        plankton.maxIntakePerFish *
-        availability *
-        dt;
+    // Plankton is retired as a food source. Brown starvation corpses are the
+    // only passive forage: fish with grazeRate > 0 eat nearby fragments.
+    this.planktonLevel = 0;
+    this._syncPlanktonVisual();
+
+    const carrionEnergy = Math.max(
+      0,
+      this.config.ecology.carrionEnergy ?? 0.18
+    );
+    const carrionRadius = Math.max(
+      0,
+      this.config.ecology.carrionRadius ?? 0.08
+    );
+    let carrionEaten = 0;
+    if (this.captureVfx && carrionEnergy > 0 && carrionRadius > 0) {
+      for (let index = 0; index < this.count; index += 1) {
+        if (!this.alive[index]) continue;
+        const school = this.config.schools[this.schoolIds[index]];
+        if (!(school.grazeRate > 0)) continue;
+        // Probabilistic graze attempts scale with grazeRate; each success
+        // consumes one corpse fragment for a fixed energy packet.
+        const attemptChance = Math.min(1, school.grazeRate * dt * 4);
+        if (this.rng.next() > attemptChance) continue;
+        const offset = index * 3;
+        const position = new THREE.Vector3(
+          this.positions[offset],
+          this.positions[offset + 1],
+          this.positions[offset + 2]
+        );
+        if (this.captureVfx.consumeNearestStarvation(position, carrionRadius)) {
+          this.energy[index] = Math.min(
+            this.config.ecology.energyCapacity,
+            this.energy[index] + carrionEnergy * school.grazeRate
+          );
+          carrionEaten += 1;
+        }
+      }
     }
-    const resource = stepPlankton({
-      level: this.planktonLevel,
-      capacity,
-      growthRate: plankton.enabled ? plankton.growthRate : 0,
-      requestedConsumption,
-      dt,
-    });
-    this.planktonLevel = resource.level;
-    this.planktonConsumed += resource.consumed;
+    this.planktonConsumed += carrionEaten;
+
     const starved = [];
     for (let index = 0; index < this.count; index += 1) {
       if (!this.alive[index]) continue;
       const school = this.config.schools[this.schoolIds[index]];
-      const intake =
-        school.grazeRate *
-        plankton.maxIntakePerFish *
-        availability *
-        dt *
-        resource.fulfillment *
-        plankton.energyConversion;
       const drain =
         metabolicRate(
           this.config,
@@ -1056,7 +1061,7 @@ export class ExperimentSimulation {
         ) * dt;
       this.energy[index] = Math.min(
         this.config.ecology.energyCapacity,
-        this.energy[index] + intake - drain
+        this.energy[index] - drain
       );
       if (this.energy[index] <= 0) starved.push(index);
     }
@@ -1434,12 +1439,11 @@ export class ExperimentSimulation {
         winnerId: ecologyWinner?.id ?? null,
         winnerName: ecologyWinner?.name ?? null,
         plankton: {
-          level: this.planktonLevel,
-          capacity: this.config.plankton.capacity,
-          fraction:
-            this.config.plankton.capacity > EPSILON
-              ? this.planktonLevel / this.config.plankton.capacity
-              : 0,
+          // Legacy field names kept for dashboard compatibility: level =
+          // current brown corpse fragments, consumed = eaten corpse count.
+          level: this.captureVfx?.starvationCount?.() ?? 0,
+          capacity: 0,
+          fraction: 0,
           consumed: this.planktonConsumed,
         },
         deaths: this.deathCounts.map((entry, schoolIndex) => ({

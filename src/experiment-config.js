@@ -134,6 +134,8 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     captureEnergyPerSize: 1,
     starvationVfxEnabled: true,
     minBurstEnergyRatio: 1 / 3,
+    carrionEnergy: 0.18,
+    carrionRadius: 0.08,
   },
   plankton: {
     enabled: false,
@@ -186,7 +188,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     spawnRadius: 0.05,
     spawnInterval: 0.03,
     cubeSize: 0.02,
-    cubeColor: '#6f7d52',
+    cubeColor: '#8B5A2B',
     radialSpeed: 0.035,
     gravity: -0.05,
     persist: true,
@@ -639,6 +641,20 @@ const scalarEntries = [
     'live',
     { min: 0, max: 1, step: 0.01 }
   ),
+  entry(
+    'ecology.carrionEnergy',
+    '生态能量',
+    '尸体能量 / 碎片',
+    'live',
+    { min: 0, max: 2, step: 0.01 }
+  ),
+  entry(
+    'ecology.carrionRadius',
+    '生态能量',
+    '尸体进食半径',
+    'live',
+    { min: 0.01, max: 0.5, step: 0.005 }
+  ),
   entry('plankton.enabled', '浮游资源', 'plankton enabled', 'live'),
   entry('plankton.capacity', '浮游资源', 'carrying capacity', 'reset', {
     min: 1,
@@ -1065,7 +1081,7 @@ function schoolEntries(config) {
         max: 12,
         step: 0.1,
       }),
-      entry(`${p}.grazeRate`, group, 'plankton graze ×', 'live', {
+      entry(`${p}.grazeRate`, group, '尸体觅食 ×', 'live', {
         min: 0,
         max: 4,
         step: 0.01,

@@ -52,7 +52,7 @@ export const DEFAULT_STARVATION_VFX = Object.freeze({
   spawnRadius: 0.05,
   spawnInterval: 0.03,
   cubeSize: 0.02,
-  cubeColor: '#6f7d52',
+  cubeColor: '#8B5A2B',
   radialSpeed: 0.035,
   gravity: -0.05,
   // Starvation debris never fades out; it only settles under gravity.
@@ -82,8 +82,14 @@ export class CaptureVfx {
     );
     this.mesh.count = 0;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_PARTICLES * 3),
+      3
+    );
+    this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
+    this._color = new THREE.Color();
 
     this.glowGeometry = new THREE.SphereGeometry(1, 20, 14);
     this.glowMaterial = new THREE.MeshBasicMaterial({
@@ -221,7 +227,7 @@ export class CaptureVfx {
         lifetime: Infinity,
         persist: true,
         size,
-        color: P.cubeColor || '#6f7d52',
+        color: P.cubeColor || '#8B5A2B',
       });
     }
 
@@ -260,11 +266,8 @@ export class CaptureVfx {
 
   step(dt) {
     this.syncMaterial();
-    if (!this.params.enabled) {
-      this.reset();
-      return;
-    }
     if (!(dt > 0)) return;
+    // Capture emit may be disabled, but persistent starvation corpses still simulate.
 
     if (this.particles.length > 0) {
       let writeIndex = 0;
@@ -330,9 +333,80 @@ export class CaptureVfx {
       _matrix.makeScale(_scale.x, _scale.y, _scale.z);
       _matrix.setPosition(_position);
       this.mesh.setMatrixAt(i, _matrix);
+      this._color.set(particle.color || '#1e4f8c');
+      this.mesh.setColorAt(i, this._color);
     }
     this.mesh.count = this.particles.length;
     this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  worldPositionAt(index, out = _position) {
+    const particle = this.particles[index];
+    if (!particle) return null;
+    if (particle.age < 0) {
+      out.copy(particle.origin);
+      return out;
+    }
+    if (particle.style === 'starvation' || particle.persist) {
+      const age = Math.max(0, particle.age);
+      out
+        .copy(particle.origin)
+        .addScaledVector(particle.initialVelocity, age);
+      out.y += 0.5 * finiteOr(particle.gravityY, -0.05) * age * age;
+      if (Number.isFinite(particle.floorY)) {
+        out.y = Math.max(particle.floorY, out.y);
+      }
+      return out;
+    }
+    const age = Math.min(particle.age, particle.lifetime);
+    const displacement = age - (age * age) / (2 * Math.max(particle.lifetime, EPSILON));
+    out
+      .copy(particle.origin)
+      .addScaledVector(particle.initialVelocity, displacement);
+    return out;
+  }
+
+  /**
+   * Eat the nearest visible starvation corpse fragment within radius.
+   * Returns true when a fragment was consumed.
+   */
+  consumeNearestStarvation(position, radius) {
+    if (!position || !(radius > 0) || this.particles.length === 0) return false;
+    const radius2 = radius * radius;
+    let best = -1;
+    let bestDistance2 = Infinity;
+    for (let i = 0; i < this.particles.length; i += 1) {
+      const particle = this.particles[i];
+      if (particle.style !== 'starvation' && !particle.persist) continue;
+      if (particle.age < 0) continue;
+      this.worldPositionAt(i, _position);
+      const dx = _position.x - position.x;
+      const dy = _position.y - position.y;
+      const dz = _position.z - position.z;
+      const distance2 = dx * dx + dy * dy + dz * dz;
+      if (distance2 <= radius2 && distance2 < bestDistance2) {
+        bestDistance2 = distance2;
+        best = i;
+      }
+    }
+    if (best < 0) return false;
+    this.particles.splice(best, 1);
+    this._writeMatrices();
+    return true;
+  }
+
+  starvationCount() {
+    let count = 0;
+    for (const particle of this.particles) {
+      if (
+        (particle.style === 'starvation' || particle.persist) &&
+        particle.age >= 0
+      ) {
+        count += 1;
+      }
+    }
+    return count;
   }
 
   _writeGlow() {

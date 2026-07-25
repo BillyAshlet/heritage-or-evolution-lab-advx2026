@@ -289,3 +289,30 @@ test('low energy blocks burst sprint', () => {
     'burst'
   );
 });
+
+
+test('carrion foraging restores energy from starvation debris', () => {
+  const simulation = smallSimulation('steady', 1001, true);
+  simulation.config.ecology.enabled = true;
+  simulation.config.ecology.carrionEnergy = 0.3;
+  simulation.config.ecology.carrionRadius = 1;
+  simulation.config.schools[0].grazeRate = 1;
+  simulation.energy[0] = 0.1;
+  const floorY =
+    -simulation.config.tank.height / 2 + simulation.config.tank.wallMargin;
+  simulation.captureVfx.emitStarvation(
+    new THREE.Vector3(
+      simulation.positions[0],
+      simulation.positions[1],
+      simulation.positions[2]
+    ),
+    { floorY }
+  );
+  // force all fragments visible
+  for (const particle of simulation.captureVfx.particles) particle.age = 0.1;
+  const before = simulation.energy[0];
+  // guarantee graze attempt succeeds by high rate and multiple steps
+  for (let i = 0; i < 20; i += 1) simulation._updateEcology(0.25);
+  assert.ok(simulation.energy[0] > before);
+  assert.ok(simulation.metrics().ecology.plankton.consumed > 0);
+});
