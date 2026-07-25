@@ -9,7 +9,6 @@ import {
   ecologyOutcome,
   effectiveMaxSpeed,
   effectiveTurnSpeed,
-  isRespawnCandidate,
   metabolicRate,
   modeFlags,
   perPredatorCooldown,
@@ -87,7 +86,6 @@ export class ExperimentSimulation {
       fps: 0,
       pairCount: 0,
       captures: 0,
-      respawned: 0,
       dynamicContacts: 0,
     };
     this.rebuild(config);
@@ -255,7 +253,6 @@ export class ExperimentSimulation {
       this.config.holding.enabled
     );
     this.releaseTime = this.released ? 0 : null;
-    this.pendingRespawns = [];
     this.relations.reset();
     this.relationMatrix = this.relations.update(
       this.config.schools,
@@ -263,7 +260,6 @@ export class ExperimentSimulation {
     );
     this.metricsState.pairCount = 0;
     this.metricsState.captures = 0;
-    this.metricsState.respawned = 0;
     this.metricsState.dynamicContacts = 0;
     this.chaseTelemetry = new Map();
     this.deathCounts = this.config.schools.map(() => ({
@@ -324,7 +320,7 @@ export class ExperimentSimulation {
         let spawn = center;
         for (
           let attempt = 0;
-          attempt < this.config.respawn.maxAttempts;
+          attempt < this.config.runtime.initialSpawnAttempts;
           attempt += 1
         ) {
           const point = this.rng.inUnitSphere();
@@ -1203,7 +1199,7 @@ export class ExperimentSimulation {
     this._syncPlanktonVisual();
   }
 
-  _captureAndRespawn(dt) {
+  _capture(dt) {
     const flags = modeFlags(this.config.runtime.mode);
     for (let index = 0; index < this.count; index += 1) {
       if (!this.alive[index]) continue;
@@ -1278,107 +1274,12 @@ export class ExperimentSimulation {
           preySchool,
           1
         );
-        if (flags.respawnEnabled) {
-          this.pendingRespawns.push({
-            index: prey,
-            schoolIndex: preySchool,
-            due: this.elapsed + this.config.respawn.delay,
-            nextTry: this.elapsed + this.config.respawn.delay,
-          });
-        }
         this.cooldowns[predator] = perPredatorCooldown(
           this._activeSchoolCount(predatorSchool),
           this.config.capture.targetCaptureRate
         );
       }
     }
-    if (flags.respawnEnabled) this._processRespawns();
-  }
-
-  _randomEdgePoint() {
-    const half = [
-      this.config.tank.width / 2,
-      this.config.tank.height / 2,
-      this.config.tank.depth / 2,
-    ];
-    const band = this.config.respawn.edgeBand;
-    const face = this.rng.integer(0, 5);
-    const point = [
-      this.rng.range(-half[0] + band, half[0] - band),
-      this.rng.range(-half[1] + band, half[1] - band),
-      this.rng.range(-half[2] + band, half[2] - band),
-    ];
-    const axis = Math.floor(face / 2);
-    point[axis] = (face % 2 === 0 ? -1 : 1) * this.rng.range(
-      half[axis] - band,
-      half[axis] - this.config.tank.wallMargin
-    );
-    return point;
-  }
-
-  _processRespawns() {
-    const remaining = [];
-    for (const pending of this.pendingRespawns) {
-      if (this.elapsed < pending.due || this.elapsed < pending.nextTry) {
-        remaining.push(pending);
-        continue;
-      }
-      let candidate = null;
-      for (
-        let attempt = 0;
-        attempt < this.config.respawn.maxAttempts;
-        attempt += 1
-      ) {
-        const point = this._randomEdgePoint();
-        if (
-          isRespawnCandidate({
-            point,
-            schoolIndex: pending.schoolIndex,
-            config: this.config,
-            derived: this.derived,
-            positions: this.positions,
-            alive: this.alive,
-            schoolIds: this.schoolIds,
-            obstacleClearance: sceneClearance(
-              point,
-              this.config,
-              false
-            ),
-            rigidBodyClearance:
-              this.physics?.rigidBodyClearance(point) ?? Infinity,
-          })
-        ) {
-          candidate = point;
-          break;
-        }
-      }
-      if (!candidate) {
-        pending.nextTry =
-          this.elapsed + this.config.respawn.retryInterval;
-        remaining.push(pending);
-        continue;
-      }
-      const index = pending.index;
-      const school = this.config.schools[pending.schoolIndex];
-      const direction = this.rng.unitVector();
-      set3(this.positions, index, ...candidate);
-      set3(
-        this.velocities,
-        index,
-        direction[0] * school.cruiseSpeed,
-        direction[1] * school.cruiseSpeed,
-        direction[2] * school.cruiseSpeed
-      );
-      this.panic[index] = 0;
-      this.energy[index] =
-        this.config.ecology.energyCapacity *
-        this.config.ecology.initialEnergyRatio;
-      this.stamina[index] = 1;
-      this.locomotionStates[index] = LOCOMOTION.CRUISE;
-      this.alive[index] = 1;
-      this.metricsState.respawned += 1;
-    }
-    this.pendingRespawns = remaining;
   }
 
   _advance(dt) {
@@ -1428,7 +1329,7 @@ export class ExperimentSimulation {
     for (let index = 0; index < this.count; index += 1) {
       this._integrate(index, dt);
     }
-    this._captureAndRespawn(dt);
+    this._capture(dt);
     this._updateEcology(dt);
     this.probe.sample(this.elapsed);
     if (!this.batchRunning) this.physics?.step(dt);
@@ -1702,8 +1603,6 @@ export class ExperimentSimulation {
       pairCount: this.metricsState.pairCount,
       captures: this.metricsState.captures,
       captureParticles: this.captureVfx?.particles.length ?? 0,
-      respawned: this.metricsState.respawned,
-      queuedRespawns: this.pendingRespawns.length,
       dynamicContacts: this.metricsState.dynamicContacts,
       rigidBodies: this.physics?.metrics?.() ?? [],
       simulationMs: this.metricsState.frameMs,

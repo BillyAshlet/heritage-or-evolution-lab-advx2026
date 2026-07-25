@@ -37,6 +37,16 @@ test('headless simulation does not require a THREE.Scene adapter', () => {
   assert.ok(simulation.elapsed > 0);
 });
 
+test('configuration and runtime expose no replenishment mechanism', () => {
+  const config = createDefaultConfig();
+  const simulation = smallSimulation('steady');
+  const metrics = simulation.metrics();
+  assert.equal('respawn' in config, false);
+  assert.equal('pendingRespawns' in simulation, false);
+  assert.equal('respawned' in metrics, false);
+  assert.equal('queuedRespawns' in metrics, false);
+});
+
 test('direct threat is proximity-driven even when pursuit target selection loses', () => {
   const simulation = smallSimulation();
   const prey = 0;
@@ -59,33 +69,31 @@ test('direct threat is proximity-driven even when pursuit target selection loses
   assert.equal(simulation.threatCounts[prey], 1);
 });
 
-test('cascade mode cannot capture or schedule respawn', () => {
+test('cascade mode cannot capture', () => {
   const simulation = smallSimulation('cascade');
   const prey = 0;
   const predator = simulation.schoolRanges[1].start;
   simulation.positions.fill(0);
   simulation.pursuitTargets[predator] = prey;
   simulation.cooldowns[predator] = 0;
-  simulation._captureAndRespawn(1 / 60);
+  simulation._capture(1 / 60);
   assert.equal(simulation.alive[prey], 1);
-  assert.equal(simulation.pendingRespawns.length, 0);
 });
 
-test('steady mode captures at visual distance and queues delayed respawn', () => {
+test('predation mode captures at visual distance and death stays permanent', () => {
   const simulation = smallSimulation('steady', 1001, true);
   const prey = 0;
   const predator = simulation.schoolRanges[1].start;
   simulation.positions.fill(0);
   simulation.pursuitTargets[predator] = prey;
   simulation.cooldowns[predator] = 0;
-  simulation._captureAndRespawn(1 / 60);
+  simulation._capture(1 / 60);
   assert.equal(simulation.alive[prey], 0);
-  assert.equal(simulation.pendingRespawns.length, 1);
   assert.ok(simulation.captureVfx.particles.length > 0);
-  assert.equal(
-    simulation.pendingRespawns[0].due,
-    simulation.elapsed + simulation.config.respawn.delay
-  );
+  assert.equal('pendingRespawns' in simulation, false);
+  simulation.elapsed += 30;
+  simulation._capture(30);
+  assert.equal(simulation.alive[prey], 0);
 });
 
 test('seeded initial simulation state is reproducible', () => {
@@ -97,7 +105,7 @@ test('seeded initial simulation state is reproducible', () => {
   assert.notDeepEqual([...a.positions], [...c.positions]);
 });
 
-test('ecology capture restores predator energy and never queues respawn', () => {
+test('ecology capture restores predator energy', () => {
   const simulation = smallSimulation('ecology');
   const prey = 0;
   const predator = simulation.schoolRanges[1].start;
@@ -107,9 +115,8 @@ test('ecology capture restores predator energy and never queues respawn', () => 
   simulation.cooldowns[predator] = 0;
   simulation._updateChaseTelemetry(1 / 60);
   simulation.elapsed = 1;
-  simulation._captureAndRespawn(1 / 60);
+  simulation._capture(1 / 60);
   assert.equal(simulation.alive[prey], 0);
-  assert.equal(simulation.pendingRespawns.length, 0);
   assert.ok(simulation.energy[predator] > 0.1);
   const pair = simulation
     .metrics()
@@ -128,7 +135,6 @@ test('ecology starvation is real death and sole survivor is terminal', () => {
   simulation._updateEcology(1);
   assert.equal(simulation.alive[0], 0);
   assert.equal(simulation.deathCounts[0].starved, 1);
-  assert.equal(simulation.pendingRespawns.length, 0);
 
   for (let schoolIndex = 1; schoolIndex < 3; schoolIndex += 1) {
     const range = simulation.schoolRanges[schoolIndex];

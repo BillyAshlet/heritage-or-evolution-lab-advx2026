@@ -673,61 +673,9 @@ export function analyzePairedCascade({
 
 export function modeFlags(mode) {
   if (mode === 'cascade') {
-    return { captureEnabled: false, respawnEnabled: false };
+    return { captureEnabled: false };
   }
-  if (mode === 'ecology') {
-    return { captureEnabled: true, respawnEnabled: false };
-  }
-  return { captureEnabled: true, respawnEnabled: true };
-}
-
-export function isRespawnCandidate({
-  point,
-  schoolIndex,
-  config,
-  derived,
-  positions,
-  alive,
-  schoolIds,
-  obstacleClearance = Infinity,
-  rigidBodyClearance = Infinity,
-}) {
-  if (obstacleClearance <= 0 || rigidBodyClearance <= 0) return false;
-  const tank = config.tank;
-  const edgeBand = config.respawn.edgeBand;
-  const half = [tank.width / 2, tank.height / 2, tank.depth / 2];
-  const atEdge =
-    half[0] - Math.abs(point[0]) <= edgeBand ||
-    half[1] - Math.abs(point[1]) <= edgeBand ||
-    half[2] - Math.abs(point[2]) <= edgeBand;
-  if (!atEdge) return false;
-
-  let hasSchoolmate = false;
-  const ownRadius2 = derived.schools[schoolIndex].cohesionRadius ** 2;
-  for (let index = 0; index < alive.length; index += 1) {
-    if (!alive[index]) continue;
-    const offset = index * 3;
-    const dx = positions[offset] - point[0];
-    const dy = positions[offset + 1] - point[1];
-    const dz = positions[offset + 2] - point[2];
-    const distance2 = dx * dx + dy * dy + dz * dz;
-    const otherSchoolIndex = schoolIds[index];
-    if (otherSchoolIndex === schoolIndex) {
-      if (distance2 <= ownRadius2) hasSchoolmate = true;
-      continue;
-    }
-    const relation = relationBetween(
-      config.schools[otherSchoolIndex],
-      config.schools[schoolIndex],
-      config.relations
-    );
-    if (relation !== 'pursuit') continue;
-    const safeDistance =
-      config.respawn.predatorSafetyFactor *
-      derived.schools[otherSchoolIndex].detectionLength;
-    if (distance2 <= safeDistance * safeDistance) return false;
-  }
-  return hasSchoolmate;
+  return { captureEnabled: true };
 }
 
 export function radialAttribution({

@@ -9,7 +9,7 @@ const PROJECTS = {
   aquarium: {
     eyebrow: 'MAIN PROJECT',
     title: '主水族馆',
-    description: '体型实时决定捕食者与被捕食者；捕获、特效和补充持续运行。',
+    description: '体型实时决定捕食者与被捕食者；捕获后死亡永久生效。',
     dashboard: 'LIVE FOOD WEB',
   },
   cascade: {
@@ -81,7 +81,7 @@ const ECOLOGY_GROUPS = new Set([
   '生态能量',
   '浮游资源',
 ]);
-const CAPTURE_GROUPS = new Set(['捕食', '补充', '捕获特效']);
+const CAPTURE_GROUPS = new Set(['捕食', '捕获特效']);
 
 function downloadText(filename, text, type = 'application/json') {
   const blob = new Blob([text], { type });
@@ -127,7 +127,6 @@ function groupVisible(project, group) {
   if (ECOLOGY_GROUPS.has(group)) return project === 'ecology';
   if (CAPTURE_GROUPS.has(group)) {
     if (project === 'cascade') return false;
-    if (project === 'ecology' && group === '补充') return false;
     return true;
   }
   return group !== '项目';
@@ -698,7 +697,7 @@ export function createExperimentDebug({
           : ''
       }` +
       `\npairs=${metrics.pairCount} sim=${metrics.simulationMs.toFixed(1)}ms render=${metrics.renderFps.toFixed(0)}fps` +
-      `\ncaptures=${metrics.captures} fx=${metrics.captureParticles} respawn=${metrics.respawned}/${metrics.queuedRespawns}` +
+      `\ncaptures=${metrics.captures} fx=${metrics.captureParticles} deaths=permanent` +
       `\nbodies=${bodies || '—'} contacts=${metrics.dynamicContacts}` +
       `${metrics.warnings.length ? `\nwarning: ${metrics.warnings.join(' · ')}` : ''}`;
     drawChart(metrics);

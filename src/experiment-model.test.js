@@ -10,7 +10,6 @@ import {
   ecologyOutcome,
   effectiveMaxSpeed,
   effectiveTurnSpeed,
-  isRespawnCandidate,
   metabolicRate,
   perPredatorCooldown,
   relationBetween,
@@ -123,65 +122,6 @@ test('per-predator independent cooldown converges to target school rate', () => 
   const targetRate = 3;
   const cooldown = perPredatorCooldown(count, targetRate);
   assert.ok(Math.abs(count / cooldown - targetRate) < 1e-12);
-});
-
-test('respawn validator enforces edge, predator safety and schoolmate cohesion', () => {
-  const config = createDefaultConfig();
-  config.schools[0].count = 2;
-  config.schools[1].count = 1;
-  config.schools[2].count = 1;
-  const derived = deriveExperiment(config);
-  const positions = new Float32Array([
-    1.45, 0, 0,
-    0, 0, 0,
-    0, 0, 0,
-    -1.4, 0, 0,
-  ]);
-  const alive = new Uint8Array([1, 0, 1, 1]);
-  const schoolIds = new Uint16Array([0, 0, 1, 2]);
-  assert.equal(
-    isRespawnCandidate({
-      point: [1.44, 0, 0],
-      schoolIndex: 0,
-      config,
-      derived,
-      positions,
-      alive,
-      schoolIds,
-      obstacleClearance: 0.2,
-      rigidBodyClearance: 0.2,
-    }),
-    true
-  );
-  positions[6] = 1.44;
-  assert.equal(
-    isRespawnCandidate({
-      point: [1.44, 0, 0],
-      schoolIndex: 0,
-      config,
-      derived,
-      positions,
-      alive,
-      schoolIds,
-      obstacleClearance: 0.2,
-      rigidBodyClearance: 0.2,
-    }),
-    false
-  );
-  assert.equal(
-    isRespawnCandidate({
-      point: [0, 0, 0],
-      schoolIndex: 0,
-      config,
-      derived,
-      positions,
-      alive,
-      schoolIds,
-      obstacleClearance: 0.2,
-      rigidBodyClearance: 0.2,
-    }),
-    false
-  );
 });
 
 test('seeded RNG is reproducible without importing the rendering engine', () => {

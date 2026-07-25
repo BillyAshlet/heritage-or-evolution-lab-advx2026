@@ -48,6 +48,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     seed: 1001,
     timeScale: 1,
     fixedDt: 1 / 60,
+    initialSpawnAttempts: 16,
   },
   schools: [
     school({
@@ -180,13 +181,6 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     biteGlowDuration: 0.45,
     biteGlowStrength: 0.85,
     biteGlowFalloff: 2.4,
-  },
-  respawn: {
-    delay: 4,
-    retryInterval: 0.5,
-    maxAttempts: 16,
-    edgeBand: 0.12,
-    predatorSafetyFactor: 1.5,
   },
   holding: {
     enabled: false,
@@ -351,7 +345,7 @@ const scalarEntries = [
   entry('runtime.mode', 'Advanced · Runtime', 'mode', 'reset', {
     options: {
       Cascade: 'cascade',
-      'Steady State': 'steady',
+      'Predation · permanent death': 'steady',
       Ecology: 'ecology',
     },
   }),
@@ -383,6 +377,17 @@ const scalarEntries = [
     max: 1 / 20,
     step: 1 / 240,
   }),
+  entry(
+    'runtime.initialSpawnAttempts',
+    'Advanced · Runtime',
+    'initial spawn attempts',
+    'rebuildScene',
+    {
+      min: 1,
+      max: 100,
+      step: 1,
+    }
+  ),
   entry('tank.preset', '缸体', 'preset', 'rebuildScene', {
     options: {
       Aquarium: 'aquarium',
@@ -852,33 +857,6 @@ const scalarEntries = [
     max: 12,
     step: 0.1,
   }),
-  entry('respawn.delay', '补充', 'respawn delay', 'live', {
-    min: 0,
-    max: 30,
-    step: 0.1,
-  }),
-  entry('respawn.retryInterval', '补充', 'retry interval', 'live', {
-    min: 0.05,
-    max: 5,
-    step: 0.05,
-  }),
-  entry('respawn.maxAttempts', '补充', 'spawn attempts', 'live', {
-    min: 1,
-    max: 100,
-    step: 1,
-  }),
-  entry('respawn.edgeBand', '补充', 'edge band', 'live', {
-    min: 0.01,
-    max: 0.5,
-    step: 0.01,
-  }),
-  entry(
-    'respawn.predatorSafetyFactor',
-    '补充',
-    'predator safety ×',
-    'live',
-    { min: 0.5, max: 5, step: 0.05 }
-  ),
   entry('holding.enabled', 'Holding / Cascade', 'holding enabled', 'reset'),
   entry('holding.schoolId', 'Holding / Cascade', 'held school id', 'reset'),
   entry(
@@ -1439,17 +1417,6 @@ export function validateConfig(candidate) {
     ) {
       errors.push(`${id}: holeDiameter 必须小于面板宽高`);
     }
-  }
-  if (
-    candidate.respawn.edgeBand >=
-    Math.min(
-      candidate.tank.width,
-      candidate.tank.height,
-      candidate.tank.depth
-    ) /
-      2
-  ) {
-    errors.push('respawn.edgeBand 必须小于缸最短边的一半');
   }
   if (
     candidate.locomotion?.burstFactor <=
