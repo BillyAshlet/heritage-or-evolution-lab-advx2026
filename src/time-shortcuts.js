@@ -1,16 +1,35 @@
-const DOUBLE_SPACE_MS = 150;
+export function resolveHeldTimeScale(heldKeys) {
+  const lastKey = heldKeys.at(-1);
+  if (lastKey === 'Enter') return 2;
+  if (lastKey === 'Space') return 0.2;
+  return 1;
+}
 
-export function resolveTimeShortcut({
-  code,
-  now,
-  lastSpaceAt = -Infinity,
-  hasPendingSpace = false,
-  doubleSpaceMs = DOUBLE_SPACE_MS,
-}) {
-  if (code === 'Enter') return 'double-speed';
-  if (code !== 'Space') return 'ignore';
-  if (hasPendingSpace && now - lastSpaceAt < doubleSpaceMs) return 'pause';
-  return 'slow-motion';
+export class HeldTimeShortcutState {
+  constructor() {
+    this.keys = [];
+  }
+
+  press(code) {
+    if (code !== 'Enter' && code !== 'Space') return null;
+    const existingIndex = this.keys.indexOf(code);
+    if (existingIndex >= 0) this.keys.splice(existingIndex, 1);
+    this.keys.push(code);
+    return resolveHeldTimeScale(this.keys);
+  }
+
+  release(code) {
+    const existingIndex = this.keys.indexOf(code);
+    if (existingIndex < 0) return null;
+    this.keys.splice(existingIndex, 1);
+    return resolveHeldTimeScale(this.keys);
+  }
+
+  clear() {
+    const hadKeys = this.keys.length > 0;
+    this.keys.length = 0;
+    return hadKeys ? 1 : null;
+  }
 }
 
 export function isEditableShortcutTarget(target) {
@@ -28,19 +47,20 @@ export class TimeShortcutController {
     root = document.getElementById('app'),
     target = window,
     setTimeScale,
-    doubleSpaceMs = DOUBLE_SPACE_MS,
   }) {
     this.root = root;
     this.target = target;
     this.setTimeScale = setTimeScale;
-    this.doubleSpaceMs = doubleSpaceMs;
-    this.pendingSpace = null;
-    this.lastSpaceAt = -Infinity;
+    this.state = new HeldTimeShortcutState();
     this.hud = this._createHud();
     this.valueLabel = this.hud.querySelector('#time-shortcut-value');
     this.lastDisplayedValue = null;
     this.onKeyDown = (event) => this._handleKeyDown(event);
+    this.onKeyUp = (event) => this._handleKeyUp(event);
+    this.onBlur = () => this._releaseAll();
     target.addEventListener('keydown', this.onKeyDown);
+    target.addEventListener('keyup', this.onKeyUp);
+    target.addEventListener('blur', this.onBlur);
     this.update(1);
   }
 
@@ -50,9 +70,8 @@ export class TimeShortcutController {
     hud.setAttribute('aria-label', '时间快捷键');
     hud.innerHTML = `
       <strong id="time-shortcut-value">1×</strong>
-      <span>ENTER&nbsp; 2×</span>
-      <span>SPACE&nbsp; 0.2×</span>
-      <span>SPACE×2&nbsp; PAUSE</span>
+      <span>HOLD ENTER&nbsp; 2×</span>
+      <span>HOLD SPACE&nbsp; 0.2×</span>
     `;
     this.root.appendChild(hud);
     return hud;
@@ -77,42 +96,27 @@ export class TimeShortcutController {
         : event.code === 'Space' || event.key === ' '
           ? 'Space'
           : event.code;
-    const now = Number.isFinite(event.timeStamp)
-      ? event.timeStamp
-      : performance.now();
-    const action = resolveTimeShortcut({
-      code,
-      now,
-      lastSpaceAt: this.lastSpaceAt,
-      hasPendingSpace: this.pendingSpace !== null,
-      doubleSpaceMs: this.doubleSpaceMs,
-    });
-    if (action === 'double-speed') {
-      event.preventDefault();
-      this._clearPendingSpace();
-      this._apply(2);
-      return;
-    }
-    if (action === 'ignore') return;
+    if (code !== 'Enter' && code !== 'Space') return;
     event.preventDefault();
-    if (action === 'pause') {
-      this._clearPendingSpace();
-      this.lastSpaceAt = -Infinity;
-      this._apply(0);
-      return;
-    }
-    this._clearPendingSpace();
-    this.lastSpaceAt = now;
-    this.pendingSpace = setTimeout(() => {
-      this.pendingSpace = null;
-      this.lastSpaceAt = -Infinity;
-      this._apply(0.2);
-    }, this.doubleSpaceMs);
+    this._apply(this.state.press(code));
   }
 
-  _clearPendingSpace() {
-    if (this.pendingSpace !== null) clearTimeout(this.pendingSpace);
-    this.pendingSpace = null;
+  _handleKeyUp(event) {
+    const code =
+      event.code === 'Enter' || event.key === 'Enter'
+        ? 'Enter'
+        : event.code === 'Space' || event.key === ' '
+          ? 'Space'
+          : event.code;
+    const scale = this.state.release(code);
+    if (scale === null) return;
+    event.preventDefault();
+    this._apply(scale);
+  }
+
+  _releaseAll() {
+    const scale = this.state.clear();
+    if (scale !== null) this._apply(scale);
   }
 
   update(value) {
@@ -125,8 +129,10 @@ export class TimeShortcutController {
   }
 
   dispose() {
-    this._clearPendingSpace();
+    this._releaseAll();
     this.target.removeEventListener('keydown', this.onKeyDown);
+    this.target.removeEventListener('keyup', this.onKeyUp);
+    this.target.removeEventListener('blur', this.onBlur);
     this.hud.remove();
   }
 }

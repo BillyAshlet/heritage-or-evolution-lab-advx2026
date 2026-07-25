@@ -24,9 +24,9 @@ function school({
     maxSpeed: 0.46,
     turnSpeed: 2.8,
     grazeRate: id === 'small' ? 1 : id === 'medium' ? 0.25 : 0,
-    separationWeight: 0.6,
-    alignmentWeight: 0.7,
-    cohesionWeight: id === 'small' ? 0.9 : id === 'medium' ? 2 : 1.2,
+    separationWeight: 0.55,
+    alignmentWeight: 0.45,
+    cohesionWeight: 0.4,
     spawnRegion: {
       centerX,
       centerY: 0,
@@ -109,7 +109,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
   locomotion: {
     burstFactor: 1.35,
     panicSpeedFactor: 1.15,
-    maxForce: 0.72,
+    maxForce: 5.2,
     interceptLookAhead: 1.3,
     boundaryWeight: 1.8,
     avoidanceWeight: 2.2,
@@ -500,7 +500,7 @@ const scalarEntries = [
   ),
   entry('locomotion.maxForce', '运动', 'max steering', 'live', {
     min: 0.05,
-    max: 4,
+    max: 10,
     step: 0.01,
   }),
   entry(

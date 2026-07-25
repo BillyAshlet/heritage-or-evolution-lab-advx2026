@@ -65,6 +65,15 @@ test('default project is the live size-derived aquarium', () => {
     config.relations.burstWeight > config.relations.pursuitWeight,
     true
   );
+  assert.deepEqual(
+    config.schools.map((school) => [
+      school.separationWeight,
+      school.alignmentWeight,
+      school.cohesionWeight,
+    ]),
+    config.schools.map(() => [0.55, 0.45, 0.4])
+  );
+  assert.equal(config.locomotion.maxForce, 5.2);
   assert.equal(config.captureVfx.enabled, true);
 });
 
