@@ -611,6 +611,17 @@
 }
 .vo-verdict--win .vo-verdict__result  { color: var(--v-sky); }
 .vo-verdict--lose .vo-verdict__result { color: var(--v-blossom); }
+/* Per-level closing line. The gap above is tightened so it reads as a
+   caption on the verdict, not as a separate block. L2's win line is a
+   full Zhuangzi sentence — max-width keeps it to a few readable lines. */
+.vo-verdict__line {
+  margin: -3vh 0 0;
+  max-width: 46ch;
+  font-size: clamp(0.95rem, 1.8vw, 1.15rem);
+  line-height: 2;
+  color: var(--v-text);
+  opacity: 0.8;
+}
 .vo-verdict__stats {
   display: flex;
   gap: 4rem;
