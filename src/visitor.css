@@ -170,6 +170,11 @@
   align-items: center;
   gap: 6vh;
   padding: 8vh 8vw;
+}
+
+/* 无素材时的兜底底色。有视频时不能画——它是不透明的，
+   而 .vo-title__bg 是 z-index:-1 的子元素，会被父背景整个盖住。 */
+.vo-title--fallback {
   background:
     radial-gradient(circle at 50% 42%, rgba(196, 137, 42, 0.16), transparent 34%),
     linear-gradient(145deg, #16130e 0%, #0f0e0c 48%, #17120b 100%);

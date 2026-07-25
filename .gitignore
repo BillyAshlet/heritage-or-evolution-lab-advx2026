@@ -9,3 +9,7 @@ docs/
 test/
 godot/
 地图演示图.png
+
+# 视频源文件（.mov 单个 30-40MB）不进仓库，只提交压好的 mp4
+output/**/*.mov
+output/imagegen/

@@ -24,28 +24,28 @@ export const VISITOR_OWNED_SCREENS = Object.freeze([
 ]);
 
 const TITLE_MEDIA = Object.freeze({
-  // The teammate-authored asset is not in Git yet. Keep the intended path as
-  // metadata and fail closed to the CSS fallback until the file is delivered.
+  // Asset now committed under output/video/ (mp4 only — the 30-40MB .mov
+  // masters stay out via .gitignore), so this can run enabled.
   src: '/output/video/inheritance-lab-loop.mp4',
-  enabled: false,
+  enabled: true,
 });
 
 const FALLBACK_LEVEL_MEDIA = Object.freeze([
   Object.freeze({
     src: '/output/video/predator-shadow-loop.mp4',
-    enabled: false,
+    enabled: true,
     tone: 'dark',
     flipY: true,
   }),
   Object.freeze({
     src: '/output/video/golden-age-pixel-dawn-loop.mp4',
-    enabled: false,
+    enabled: true,
     tone: 'bright',
     flipY: true,
   }),
   Object.freeze({
     src: '/output/video/drained-paradise-loop.mp4',
-    enabled: false,
+    enabled: true,
     tone: 'dark',
     flipY: true,
   }),
@@ -480,9 +480,12 @@ export function mountVisitorMode({
     const circumference = 2 * Math.PI * 85;
     const arc = (circumference * 0.4).toFixed(1);
     const gap = (circumference * 0.6).toFixed(1);
+    // Same media/fallback gating the cutscene uses: the fallback gradient
+    // is opaque, so it must not paint when there is real footage behind it.
+    const titleMediaHtml = mediaMarkup(TITLE_MEDIA, 'vo-title__bg');
     overlay.innerHTML = `
-      <div class="vo-screen vo-title">
-        ${mediaMarkup(TITLE_MEDIA, 'vo-title__bg')}
+      <div class="vo-screen vo-title ${titleMediaHtml ? 'vo-title--media' : 'vo-title--fallback'}">
+        ${titleMediaHtml}
         <div class="vo-title__lang" aria-label="${escapeHtml(t('language'))}">
           <button class="vo-btn vo-btn--${language === 'zh' ? 'active' : 'ghost'} vo-lang-btn" data-lang="zh" type="button">中</button>
           <button class="vo-btn vo-btn--${language === 'en' ? 'active' : 'ghost'} vo-lang-btn" data-lang="en" type="button">EN</button>
