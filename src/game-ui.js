@@ -864,7 +864,10 @@ export class GameUI {
           ? "三代谱系存续"
           : "本代获得遗传资格"
         : "本代未达存活底线";
+      // 每关专属结算文案优先；没写的关卡回落到通用说明。
+      const levelVerdict = won ? level.verdictWin : level.verdictLose;
       this.elements.resultCopy.textContent =
+        levelVerdict ??
         viewModel.result?.message ??
         (won
           ? isLastLevel

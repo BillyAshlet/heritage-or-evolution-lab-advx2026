@@ -362,6 +362,8 @@
   color: var(--game-muted);
   font: 400 13px/1.7 var(--game-serif);
   letter-spacing: 0.02em;
+  /* 关卡文案是两行结构（设问 + 三样东西），换行必须留住 */
+  white-space: pre-line;
 }
 
 .game-ui__story:empty {
@@ -515,6 +517,8 @@
   margin: 0;
   color: var(--game-muted);
   font: 400 10px/1.55 var(--game-serif);
+  /* 结算文案同样是两行；L2 胜利那句是完整的《逍遥游》引文 */
+  white-space: pre-line;
 }
 
 .game-ui__death-log {
