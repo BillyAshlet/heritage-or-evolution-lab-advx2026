@@ -280,6 +280,16 @@
   text-wrap: balance;
 }
 
+/* 长标题档：典故对仗句（15–17 字）。放宽栏宽、收字号、开行距，
+   让它落成两行并在逗号附近断开，而不是按 13ch 碎成四行。 */
+.game-ui__dossier h2.game-ui__title--long {
+  /* em 而非 ch：ch 是 "0" 的字宽（约半个汉字），13ch 只装得下 6 个字。
+     9.5em ≈ 9 个汉字一行，17 字的对仗句正好落两行。 */
+  max-width: 9.5em;
+  font: 600 clamp(19px, 1.95vw, 25px) / 1.45 var(--game-serif);
+  letter-spacing: 0.02em;
+}
+
 .game-ui__era {
   margin: 7px 0 0;
   color: var(--game-muted);

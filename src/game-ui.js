@@ -816,8 +816,15 @@ export class GameUI {
     this.root.dataset.result = showResult ? (won ? "won" : "lost") : "pending";
     this.elements.specimenId.textContent = `SPECIMEN BF–${String(this.levelIndex + 1).padStart(2, "0")}`;
     this.elements.phaseLabel.textContent = phaseCopy.label;
-    this.elements.levelTitle.textContent =
+    const levelTitleText =
       level.title ?? level.label ?? `第 ${this.levelIndex + 1} 关`;
+    this.elements.levelTitle.textContent = levelTitleText;
+    // 典故标题是 15–17 字的对仗长句，用短标签的字号会碎成四行。
+    // 超过 10 字切到长标题档；短标签保持原有版式不变。
+    this.elements.levelTitle.classList.toggle(
+      "game-ui__title--long",
+      levelTitleText.length > 10,
+    );
     this.elements.era.textContent = level.era ?? "未标记生态年代";
     this.elements.levelCounter.textContent =
       `${String(this.levelIndex + 1).padStart(2, "0")} / ${String(this.levelCount).padStart(2, "0")}`;

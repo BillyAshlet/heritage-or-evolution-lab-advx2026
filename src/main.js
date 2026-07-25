@@ -278,7 +278,8 @@ async function bootstrap() {
       levelCount: LEVEL_SPECS.length,
       level: {
         ...level,
-        title: level.label,
+        // spec 自带 title（典故长句）优先；没写的关卡回落到短 label。
+        title: level.title ?? level.label,
         era: copy.era,
         objective: copy.objective,
       },
