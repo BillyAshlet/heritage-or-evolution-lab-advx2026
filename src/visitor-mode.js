@@ -7,6 +7,7 @@ import {
   PREDATOR_PARAMS,
   ENERGY_PARAMS,
 } from './evolution-model.js';
+import { mountTitleFish } from './title-fish.js';
 
 // ── Background config ──────────────────────────────────────────────────────
 // null  = Three.js canvas shows through (default)
@@ -85,18 +86,28 @@ const I18N = {
       {
         title: '共工怒触不周山，天倾西北，地陷东南',
         story: '天既以倾，何以为北？\n泥土，饥饿与画饼充饥。',
+        // 结算文案：胜也不许庆祝，第二句就是债的声明。
+        verdictWin:  '天终未补，而你们活着。\n活下来的方式，会变成活下去的方式。',
+        verdictLose: '地陷东南，你们随之而下。',
         inherit: '你在这一局改变了选择。\n这些参数将在下一局被永久锁定。',
         cta: '调整参数 →',
       },
       {
         title: '这是最好的时代，这是最坏的时代',
         story: '水既已涨，何以为岸？\n吞咽，膨胀，与来不及计算的重量。',
+        // 全场唯一一次让玩家飘。第二句在最得意的时刻埋债：
+        // 风是时代，翅膀是你调大的体型——风会停，翅膀不会缩回去。
+        verdictWin:  '鹏之徙于南冥也，水击三千里，抟扶摇而上者九万里，去以六月息者也。\n风停时，翅膀还在。',
+        verdictLose: '最好的时代没有等你。',
         inherit: '两局的选择，已经成为下一代的起点。\n潮水退去时，它们不会问你当时为什么那样选。',
         cta: '调整参数 →',
       },
       {
         title: '昔为东海之波臣，今困于车辙之中',
         story: '水既已涸，何以为继？\n等待，蛰伏，与远水解不了的近渴。',
+        // 败句是庄子原文的收尾，本身就是一句游戏结束。
+        verdictWin:  '斗升之水，足以活我。\n你留下的不是繁盛，是一条还在喘气的血脉。',
+        verdictLose: '不如早索我于枯鱼之肆。\n远水终于来了，河床上已经没有鱼。',
         inherit: '',
         cta: '确认 →',
       },
@@ -146,6 +157,8 @@ const I18N = {
         // northwest, the earth caved southeast. Kept as myth, not glossed.
         title: 'Gong Gong struck Mount Buzhou — the sky tilts northwest, the earth caves southeast',
         story: 'The sky already leans. Where, then, is north?\nSoil, hunger, and pictured cakes for a starving mouth.',
+        verdictWin:  'No one mended the sky. You lived anyway.\nHow you survived becomes how you must live.',
+        verdictLose: 'The earth caved southeast. You went down with it.',
         inherit: 'Your choices this round are now sealed.\nThey will be locked in the next round.',
         cta: 'Adjust Traits →',
       },
@@ -154,6 +167,11 @@ const I18N = {
         // used about themselves. English needs no translation here.
         title: 'It was the best of times, it was the worst of times',
         story: 'The water has risen. Where, then, is the shore?\nSwallowing, swelling, and weight no one stopped to count.',
+        // The one moment the game lets the player feel magnificent —
+        // and plants the debt in the second line: the wind is the era,
+        // the wings are the size you grew. Wind stops, wings stay.
+        verdictWin:  'The Peng migrates to the southern deep: it beats the water three thousand li, spirals ninety thousand li on the whirlwind, and departs on the six-month wind.\nWhen the wind stops, the wings remain.',
+        verdictLose: 'The best of times did not wait for you.',
         inherit: 'Two rounds of choices, fixed forever.\nWhen the tide goes out, no one asks why you chose that way.',
         cta: 'Adjust Traits →',
       },
@@ -162,6 +180,9 @@ const I18N = {
         // water, saying it was once a subject of the Eastern Sea.
         title: 'Once a subject of the Eastern Sea — now stranded in a wheel rut',
         story: 'The water has dried. What, then, carries on?\nWaiting, lying low, and distant rivers that cannot wet a near thirst.',
+        // The lose line is Zhuangzi's own punchline — already a game over.
+        verdictWin:  'A pint of water would be enough to keep me alive.\nWhat you leave behind is not abundance — it is a bloodline still breathing.',
+        verdictLose: 'Better to look for me in the dried-fish shop.\nThe distant river arrived. There were no fish left in the bed.',
         inherit: '',
         cta: 'Confirm →',
       },
@@ -196,6 +217,7 @@ let _lastVerdict    = null;
 let _runSkipRevealed = false;
 let _sweeping        = false;
 let _proximityCleanup = null;
+let _titleFish = null;
 
 let _overlay        = null;   // the #visitor-overlay element
 
@@ -251,11 +273,16 @@ const SWEEP_SCREENS = new Set([
 
 function go(nextScreen, dir = 'cw') {
   if (_proximityCleanup) { _proximityCleanup(); _proximityCleanup = null; }
+  if (_titleFish) { _titleFish.dispose(); _titleFish = null; }
   _screen = nextScreen;
   _overlay.dataset.screen = nextScreen;
   render();
 
   if (!dir || _sweeping || !SWEEP_SCREENS.has(nextScreen)) return;
+  if (dir === 'ring-cw' || dir === 'ring-ccw') {
+    runRingWipe(dir === 'ring-cw');
+    return;
+  }
   const el = _overlay.firstElementChild;
   if (!el) return;
   _sweeping = true;
@@ -266,10 +293,39 @@ function go(nextScreen, dir = 'cw') {
   }, { once: true });
 }
 
+// Composite reveal for era changes (Begin, verdict → next level). Two
+// bg-colored curtains sit above the freshly rendered screen and animate
+// away together:
+//   · .vo-wipe-ring — a thick annulus (the border of a circle div),
+//     removed by a conic clock sweep (CW forward / CCW back);
+//   · .vo-wipe-flat — everything else (inner disc + outside, cut out via
+//     radial mask), removed by a horizontal wipe (right→left forward /
+//     left→right back).
+// Geometry, duration and easing live in visitor.css (--vo-wipe-* vars).
+function runRingWipe(forward) {
+  _sweeping = true;
+  const ring = document.createElement('div');
+  ring.className = `vo-wipe-ring vo-wipe-ring--${forward ? 'cw' : 'ccw'}`;
+  const flat = document.createElement('div');
+  flat.className = `vo-wipe-flat vo-wipe-flat--${forward ? 'fwd' : 'back'}`;
+  _overlay.append(flat, ring);
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    flat.remove(); ring.remove();
+    _sweeping = false;
+  };
+  flat.addEventListener('animationend', done, { once: true });
+  // If a re-render nukes the curtains mid-animation, animationend never
+  // fires — don't leave _sweeping stuck.
+  setTimeout(done, 1200);
+}
+
 function startLevel() {
   _traitsOnEntry = { ...TRAIT_DEFAULTS };   // compare against neutral baseline
   resetSimForLevel();
-  go('CUTSCENE');
+  go('CUTSCENE', 'ring-cw');
 }
 
 function openTuning() {
@@ -338,7 +394,7 @@ function advanceLevel() {
 
   const last = _lineage.at(-1);
   if (last && last.changed.size > 0) {
-    go('INHERIT');
+    go('INHERIT', 'ring-cw');
   } else {
     startLevel();
   }
@@ -362,6 +418,8 @@ function render() {
 
 // ── Screen renderers ───────────────────────────────────────────────────────
 function renderTitle() {
+  if (_proximityCleanup) { _proximityCleanup(); _proximityCleanup = null; }
+  if (_titleFish) { _titleFish.dispose(); _titleFish = null; }
   const bgHtml = bgMarkup(TITLE_BG, 'vo-title__bg');
 
   // r=85, circumference ≈ 534 — show ~40% of the arc
@@ -372,6 +430,7 @@ function renderTitle() {
   _overlay.innerHTML = `
     <div class="vo-screen vo-title">
       ${bgHtml}
+      <canvas class="vo-title__fish" aria-hidden="true"></canvas>
       <div class="vo-title__lang">
         <button class="vo-btn vo-btn--${_lang === 'zh' ? 'active' : 'ghost'} vo-lang-btn" data-lang="zh">中</button>
         <button class="vo-btn vo-btn--${_lang === 'en' ? 'active' : 'ghost'} vo-lang-btn" data-lang="en">EN</button>
@@ -404,6 +463,10 @@ function renderTitle() {
     </div>
   `;
 
+  _titleFish = mountTitleFish(
+    _overlay.querySelector('.vo-title__fish'),
+    { count: 16, cohesionRadius: FX_RING_RADIUS }
+  );
   applyTextFx();
 
   _overlay.querySelector('[data-action="start"]').onclick = () => {
@@ -502,7 +565,7 @@ function renderCutscene() {
   applyTextFx();
   _overlay.querySelector('[data-action="continue"]').onclick = openTuning;
   if (_levelIndex === 0) {
-    _overlay.querySelector('[data-action="back"]').onclick = () => go('TITLE', 'ccw');
+    _overlay.querySelector('[data-action="back"]').onclick = () => go('TITLE', 'ring-ccw');
   }
 }
 
@@ -604,10 +667,14 @@ function renderVerdict() {
   const v      = _lastVerdict;
   const pct    = Math.round(v.survivalRatio * 100);
   const isLast = _levelIndex >= LEVEL_CONFIGS.length - 1;
+  // Per-level, win/lose-specific line. Falls back to nothing if a level
+  // hasn't been written yet — the stats screen still stands on its own.
+  const verdictLine = levelT(v.won ? 'verdictWin' : 'verdictLose');
 
   _overlay.innerHTML = `
     <div class="vo-screen vo-verdict ${v.won ? 'vo-verdict--win' : 'vo-verdict--lose'}">
       <div class="vo-verdict__result" data-fx="letters" data-fx-dir="top" data-fx-delay="60" data-fx-from="300" data-fx-to="900">${v.won ? t('win') : t('lose')}</div>
+      ${verdictLine ? `<p class="vo-verdict__line" data-fx="words" data-fx-from="300" data-fx-to="700">${nl2br(verdictLine)}</p>` : ''}
       <div class="vo-verdict__stats">
         <div class="vo-stat">
           <span class="vo-stat__value" data-fx="letters" data-fx-from="400" data-fx-to="900">${pct}%</span>
@@ -701,7 +768,14 @@ function setupVariableProximity(targets, {
     mouse.y = e.clientY;
     hasMouse = true;
   }
+  function onLeave() {
+    hasMouse = false;
+    ring.classList.remove('vo-cursor-ring--on');
+    _titleFish?.clearCohesionPointer();
+  }
   window.addEventListener('mousemove', onMove);
+  document.documentElement.addEventListener('mouseleave', onLeave);
+  window.addEventListener('blur', onLeave);
 
   let raf = requestAnimationFrame(function frame() {
     raf = requestAnimationFrame(frame);
@@ -711,6 +785,7 @@ function setupVariableProximity(targets, {
     cursor.y += (mouse.y - cursor.y) * FX_FOLLOW;
     ring.style.transform = `translate(${cursor.x - FX_RING_RADIUS}px, ${cursor.y - FX_RING_RADIUS}px)`;
     ring.classList.add('vo-cursor-ring--on');
+    _titleFish?.setCohesionPointer(cursor.x, cursor.y, true);
 
     for (const { el, fromWeight: fw, toWeight: tw, spans } of list) {
       if (!el.isConnected) continue;
@@ -750,6 +825,9 @@ function setupVariableProximity(targets, {
   return () => {
     cancelAnimationFrame(raf);
     window.removeEventListener('mousemove', onMove);
+    document.documentElement.removeEventListener('mouseleave', onLeave);
+    window.removeEventListener('blur', onLeave);
+    _titleFish?.clearCohesionPointer();
     ring.remove();
   };
 }
@@ -896,6 +974,15 @@ export function mountVisitorMode() {
     cutscene(index) {
       _levelIndex = Math.max(0, Math.min(LEVEL_CONFIGS.length - 1, index));
       go('CUTSCENE');
+    },
+    // Preview a verdict screen with fake stats — lets copy be judged
+    // without playing a full round. downstream.verdict(1, true)
+    verdict(index, won = true) {
+      _levelIndex = Math.max(0, Math.min(LEVEL_CONFIGS.length - 1, index));
+      _lastVerdict = won
+        ? { won: true,  survivalRatio: 0.72, eaten: 4,  starved: 3 }
+        : { won: false, survivalRatio: 0.18, eaten: 12, starved: 9 };
+      go('VERDICT');
     },
     setLang(lang) { _lang = lang; go(_screen, null); },
   };
