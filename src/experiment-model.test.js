@@ -23,9 +23,13 @@ test('default dynamic radii match the 400/200/40 design values', () => {
   assert.ok(Math.abs(derived.schools[0].neighborRadius - 0.314) < 0.002);
   assert.ok(Math.abs(derived.schools[1].neighborRadius - 0.396) < 0.002);
   assert.ok(Math.abs(derived.schools[2].neighborRadius - 0.426) < 0.002);
-  assert.ok(Math.abs(derived.schools[0].detectionLength - 0.2355) < 0.002);
-  assert.ok(Math.abs(derived.schools[1].detectionLength - 0.2966) < 0.002);
-  assert.ok(Math.abs(derived.schools[2].detectionLength - 0.3196) < 0.002);
+  assert.ok(Math.abs(derived.schools[0].detectionLength - 0.1413) < 0.002);
+  assert.ok(Math.abs(derived.schools[1].detectionLength - 0.1782) < 0.002);
+  assert.ok(Math.abs(derived.schools[2].detectionLength - 0.1917) < 0.002);
+  assert.equal(
+    derived.schools[0].panicRadius,
+    derived.schools[0].detectionLength
+  );
 });
 
 test('visual-length lower bound prevents dense configurations from tunneling', () => {

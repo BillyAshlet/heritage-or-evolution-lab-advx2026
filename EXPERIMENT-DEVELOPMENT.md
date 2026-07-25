@@ -71,13 +71,15 @@ actorSize / targetSize ≤ 1/k → evade
 
 捕食 steering 分为两个同时存在的连续力层：
 
-- 大范围使用派生 `detectionLength` 感知所有可捕食个体，以局部猎物群心
-  施加捕猎凝聚力；局部为空时退回可捕食鱼群的全局群心。
+- 大范围只在局部 hunt radius 内感知可捕食个体，以局部猎物群心施加捕猎
+  凝聚力；局部为空时不施加捕猎力，继续使用普通 Boid 三力。
 - 较小的 `detectionLength × burstRadiusFactor` 内选择近身目标，优先选择
   指向与捕食者当前速度方向夹角最小的猎物，夹角相同时选择更近者，并施加
   独立的高权重 burst 加速度。
 
-`pursuitWeight`（面板显示为“捕猎凝聚 weight”）、`burstRadiusFactor` 和
+hunt/panic radius 由当前鱼群动态 `cohesionRadius × detectionLengthFactor`
+得到，默认倍率 `0.45`；捕食和恐慌在此范围外都不会触发。`pursuitWeight`
+（面板显示为“捕猎凝聚 weight”）、`burstRadiusFactor` 和
 `burstWeight` 均可实时调节。捕食者只在 burst 目标存在时获得 `1.35×`
 速度上限，逃逸者上限为 `1.15×`。
 捕获距离使用双方真实渲染体长之和的一半。捕食模式按每个捕食鱼群
@@ -155,10 +157,11 @@ burst 可产生额外能量消耗；鱼只会因生态 energy 归零而饿死，
 鼠标转头和双击入口已删除。目标死亡后优先切到最近同群活鱼，否则退出。
 
 时间倍率除面板 `time scale` 外提供按住型全局快捷键：按住 Enter 临时使用
-`2×`，按住 Space 临时使用 `0.2×`；松开恢复 `1×`。同时按住时最后按下者
-优先，释放后回到仍按住的另一个倍率；窗口失焦也恢复 `1×`，避免临时倍率
-卡住。输入控件获得焦点时不劫持这些按键；暂停仍可在面板把 time scale
-调为 `0`，不再使用双击 Space。
+`2×`，按住 Space 临时使用 `0.2×`；松开恢复 `1×`。200ms 内连续按两次
+Space 会额外退出 closeup/follow、清除选择并回到全局原视角，不改变 Space
+的按住慢放语义。同时按住时最后按下者优先，释放后回到仍按住的另一个倍率；
+窗口失焦也恢复 `1×`，避免临时倍率卡住。输入控件获得焦点时不劫持这些
+按键；暂停仍可在面板把 time scale 调为 `0`。
 
 默认三群的 Boid 权重统一为 separation/alignment/cohesion
 `0.55 / 0.45 / 0.40`，总 steering 上限为 `5.2`。动态半径在默认小群下

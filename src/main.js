@@ -273,6 +273,9 @@ async function bootstrap() {
       debug.pane?.refresh();
       return current.runtime.timeScale;
     },
+    onDoubleSpace() {
+      cameraController.exitView(true);
+    },
   });
 
   const experimentApi = {

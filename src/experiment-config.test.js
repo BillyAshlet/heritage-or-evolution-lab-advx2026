@@ -74,6 +74,7 @@ test('default project is the live size-derived aquarium', () => {
     config.schools.map(() => [0.55, 0.45, 0.4])
   );
   assert.equal(config.locomotion.maxForce, 5.2);
+  assert.equal(config.perception.detectionLengthFactor, 0.45);
   assert.equal(config.captureVfx.enabled, true);
 });
 

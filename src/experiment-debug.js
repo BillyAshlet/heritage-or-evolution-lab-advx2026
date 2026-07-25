@@ -661,7 +661,7 @@ export function createExperimentDebug({
       .filter(Boolean)
       .join(' · ');
     roleState.derived =
-      `size ${school.size.toFixed(2)} · hunt ${school.detectionLength.toFixed(3)} · burst ${school.burstRadius.toFixed(3)}`;
+      `size ${school.size.toFixed(2)} · hunt/panic ${school.detectionLength.toFixed(3)} · burst ${school.burstRadius.toFixed(3)}`;
     boidState.separationRadius =
       school.separationRadius.toFixed(3);
     boidState.alignmentRadius =

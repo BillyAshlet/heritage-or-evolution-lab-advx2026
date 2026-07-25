@@ -32,6 +32,23 @@ export class HeldTimeShortcutState {
   }
 }
 
+export class SpaceDoubleTapDetector {
+  constructor(maxIntervalMs = 200) {
+    this.maxIntervalMs = maxIntervalMs;
+    this.lastPressAt = -Infinity;
+  }
+
+  press(now) {
+    const isDoubleTap = now - this.lastPressAt < this.maxIntervalMs;
+    this.lastPressAt = isDoubleTap ? -Infinity : now;
+    return isDoubleTap;
+  }
+
+  clear() {
+    this.lastPressAt = -Infinity;
+  }
+}
+
 export function isEditableShortcutTarget(target) {
   if (!target || typeof target !== 'object') return false;
   const tagName = String(target.tagName ?? '').toUpperCase();
@@ -47,11 +64,15 @@ export class TimeShortcutController {
     root = document.getElementById('app'),
     target = window,
     setTimeScale,
+    onDoubleSpace = () => {},
+    doubleSpaceMs = 200,
   }) {
     this.root = root;
     this.target = target;
     this.setTimeScale = setTimeScale;
+    this.onDoubleSpace = onDoubleSpace;
     this.state = new HeldTimeShortcutState();
+    this.doubleSpace = new SpaceDoubleTapDetector(doubleSpaceMs);
     this.hud = this._createHud();
     this.valueLabel = this.hud.querySelector('#time-shortcut-value');
     this.lastDisplayedValue = null;
@@ -72,6 +93,7 @@ export class TimeShortcutController {
       <strong id="time-shortcut-value">1×</strong>
       <span>HOLD ENTER&nbsp; 2×</span>
       <span>HOLD SPACE&nbsp; 0.2×</span>
+      <span>SPACE×2&nbsp; GLOBAL VIEW</span>
     `;
     this.root.appendChild(hud);
     return hud;
@@ -99,6 +121,12 @@ export class TimeShortcutController {
     if (code !== 'Enter' && code !== 'Space') return;
     event.preventDefault();
     this._apply(this.state.press(code));
+    if (code === 'Space') {
+      const now = Number.isFinite(event.timeStamp)
+        ? event.timeStamp
+        : performance.now();
+      if (this.doubleSpace.press(now)) this.onDoubleSpace();
+    }
   }
 
   _handleKeyUp(event) {
@@ -116,6 +144,7 @@ export class TimeShortcutController {
 
   _releaseAll() {
     const scale = this.state.clear();
+    this.doubleSpace.clear();
     if (scale !== null) this._apply(scale);
   }
 

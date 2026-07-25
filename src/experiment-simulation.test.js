@@ -109,6 +109,36 @@ test('predation uses broad prey cohesion before the smaller burst layer', () => 
   assert.equal(simulation.pursuitTargets[predator], -1);
 });
 
+test('predators outside local hunt radius remain ordinary boids', () => {
+  const simulation = smallSimulation();
+  simulation.config.locomotion.boundaryWeight = 0;
+  simulation.config.locomotion.avoidanceWeight = 0;
+  simulation.config.locomotion.wanderWeight = 0;
+  for (const school of simulation.config.schools) {
+    school.separationWeight = 0;
+    school.alignmentWeight = 0;
+    school.cohesionWeight = 0;
+  }
+  for (let index = 0; index < simulation.count; index += 1) {
+    const schoolIndex = simulation.schoolIds[index];
+    simulation.positions[index * 3] =
+      schoolIndex === 0 ? 1 : schoolIndex === 1 ? -1 : 0;
+    simulation.positions[index * 3 + 1] = 0;
+    simulation.positions[index * 3 + 2] = 0;
+    simulation.velocities[index * 3] = 0;
+    simulation.velocities[index * 3 + 1] = 0;
+    simulation.velocities[index * 3 + 2] =
+      simulation.config.schools[schoolIndex].cruiseSpeed;
+  }
+  simulation._advance(1 / 60);
+  const predator = simulation.schoolRanges[1].start;
+  assert.ok(Math.abs(simulation.velocities[predator * 3]) < 1e-8);
+  assert.equal(simulation.predationCounts[predator], 0);
+  assert.equal(simulation.pursuitTargets[predator], -1);
+  assert.equal(simulation.threatCounts[0], 0);
+  assert.equal('schoolCenters' in simulation, false);
+});
+
 test('burst target prefers the prey closest to the current heading', () => {
   const simulation = smallSimulation();
   const forwardPrey = 0;

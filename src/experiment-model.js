@@ -85,6 +85,8 @@ export function deriveSchool(config, school) {
       neighborRadius * config.perception.separationRadiusFactor,
     detectionLength:
       neighborRadius * config.perception.detectionLengthFactor,
+    panicRadius:
+      neighborRadius * config.perception.detectionLengthFactor,
   };
 }
 

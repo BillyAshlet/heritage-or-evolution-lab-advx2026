@@ -129,8 +129,6 @@ export class ExperimentSimulation {
     this.chaseStartTimes = new Float64Array(this.count);
     this.targetAlignment = new Float32Array(this.count);
     this.targetDistance2 = new Float32Array(this.count);
-    this.schoolCenters = new Float32Array(config.schools.length * 3);
-    this.schoolAliveCounts = new Uint16Array(config.schools.length);
     this.schoolRanges = [];
     let cursor = 0;
     for (
@@ -630,7 +628,7 @@ export class ExperimentSimulation {
     // directThreat belongs to the prey and is proximity-driven. It does
     // not care whether this predator won target selection or is cooling down.
     const preyDetection =
-      this.derived.schools[targetSchool].detectionLength;
+      this.derived.schools[targetSchool].panicRadius;
     if (distance2 <= preyDetection * preyDetection) {
       this.threatCounts[target] += 1;
       const inverse = 1 / Math.max(distance, EPSILON);
@@ -793,37 +791,6 @@ export class ExperimentSimulation {
         (this.predationSums[offset + 2] / localPredationCount -
           this.positions[offset + 2]) *
         this.config.relations.pursuitWeight;
-    } else {
-      let preyCount = 0;
-      let preyX = 0;
-      let preyY = 0;
-      let preyZ = 0;
-      for (
-        let preySchool = 0;
-        preySchool < this.config.schools.length;
-        preySchool += 1
-      ) {
-        if (this.relationMatrix[schoolIndex][preySchool] !== 'pursuit') {
-          continue;
-        }
-        const aliveCount = this.schoolAliveCounts[preySchool];
-        const preyOffset = preySchool * 3;
-        preyCount += aliveCount;
-        preyX += this.schoolCenters[preyOffset] * aliveCount;
-        preyY += this.schoolCenters[preyOffset + 1] * aliveCount;
-        preyZ += this.schoolCenters[preyOffset + 2] * aliveCount;
-      }
-      if (preyCount > 0) {
-        fx +=
-          (preyX / preyCount - this.positions[offset]) *
-          this.config.relations.pursuitWeight;
-        fy +=
-          (preyY / preyCount - this.positions[offset + 1]) *
-          this.config.relations.pursuitWeight;
-        fz +=
-          (preyZ / preyCount - this.positions[offset + 2]) *
-          this.config.relations.pursuitWeight;
-      }
     }
 
     const target = this.pursuitTargets[index];
@@ -1177,29 +1144,6 @@ export class ExperimentSimulation {
     this._clearAccumulators();
     this.hash.build(this.positions, this.alive, this.count);
     this._pairPasses();
-    this.schoolCenters.fill(0);
-    this.schoolAliveCounts.fill(0);
-    for (let index = 0; index < this.count; index += 1) {
-      if (!this.alive[index]) continue;
-      const schoolIndex = this.schoolIds[index];
-      const centerOffset = schoolIndex * 3;
-      const offset = index * 3;
-      this.schoolCenters[centerOffset] += this.positions[offset];
-      this.schoolCenters[centerOffset + 1] += this.positions[offset + 1];
-      this.schoolCenters[centerOffset + 2] += this.positions[offset + 2];
-      this.schoolAliveCounts[schoolIndex] += 1;
-    }
-    for (
-      let schoolIndex = 0;
-      schoolIndex < this.config.schools.length;
-      schoolIndex += 1
-    ) {
-      const count = Math.max(1, this.schoolAliveCounts[schoolIndex]);
-      const offset = schoolIndex * 3;
-      this.schoolCenters[offset] /= count;
-      this.schoolCenters[offset + 1] /= count;
-      this.schoolCenters[offset + 2] /= count;
-    }
     for (let index = 0; index < this.count; index += 1) {
       this._steerFish(index, dt);
     }
@@ -1449,6 +1393,7 @@ export class ExperimentSimulation {
         cohesionRadius:
           this.derived.schools[index].cohesionRadius,
         detectionLength: this.derived.schools[index].detectionLength,
+        panicRadius: this.derived.schools[index].panicRadius,
         burstRadius:
           this.derived.schools[index].detectionLength *
           this.config.relations.burstRadiusFactor,

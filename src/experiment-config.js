@@ -91,7 +91,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     minNeighborRadiusFactor: 3,
     alignmentRadiusFactor: 0.35,
     separationRadiusFactor: 0.4,
-    detectionLengthFactor: 0.75,
+    detectionLengthFactor: 0.45,
     crossSeparationScale: 0.15,
   },
   relations: {
@@ -419,7 +419,7 @@ const scalarEntries = [
   entry(
     'perception.detectionLengthFactor',
     '感知',
-    'detection length ×',
+    'hunt / panic radius × cohesion',
     'live',
     { min: 0.1, max: 2, step: 0.01 }
   ),
