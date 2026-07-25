@@ -230,14 +230,15 @@ class TitleFishSchool {
       if (this.pointer.influence > 0.001) {
         const dx = this.pointer.x - px;
         const dy = this.pointer.y - py;
-          const distance = Math.hypot(dx, dy);
-          if (distance > 0) {
-            const normalizedDistance = distance / this.cohesionRadius;
-            const field = 1 / (1 + normalizedDistance * normalizedDistance);
-            const strength =
+        const distance = Math.hypot(dx, dy);
+        if (distance > 0 && distance < this.cohesionRadius) {
+          const normalizedDistance = distance / this.cohesionRadius;
+          const field = 1 - normalizedDistance;
+          const strength =
               (POINTER_COHESION_BASE + POINTER_COHESION_PEAK * field) *
+              field *
               this.pointer.influence;
-            ax += (dx / distance) * strength;
+          ax += (dx / distance) * strength;
             ay += (dy / distance) * strength;
           }
       }
