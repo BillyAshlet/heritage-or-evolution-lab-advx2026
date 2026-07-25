@@ -378,6 +378,19 @@
   z-index: -2;
   opacity: 0.5;
 }
+/* Bright-tone levels (L2 golden age): let the footage actually shine.
+   The scrim collapses to a left-edge wedge — dark enough behind the
+   text column, fully clear by mid-frame so the gold reads. */
+.vo-cutscene--bright .vo-cutscene__bg { opacity: 0.92; }
+.vo-cutscene--bright.vo-cutscene--media::before {
+  background: linear-gradient(
+    100deg,
+    rgba(4, 8, 14, 0.86) 0%,
+    rgba(4, 8, 14, 0.58) 34%,
+    rgba(4, 8, 14, 0.10) 68%,
+    rgba(4, 8, 14, 0) 100%
+  );
+}
 /* Scrim: keeps long classical-Chinese titles legible over moving footage */
 .vo-cutscene--media::before {
   content: '';

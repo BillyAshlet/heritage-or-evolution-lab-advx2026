@@ -16,9 +16,13 @@ const TITLE_BG = '/output/video/inheritance-lab-loop.mp4';
 
 // Per-level cutscene backgrounds, indexed by level (L1/L2/L3).
 // 三金 fills L2/L3 here — same rule: null = canvas shows through.
+// Entry = path string, or { src, tone } where tone 'bright' lifts the
+// footage and thins the scrim. The three eras are meant to read as dark
+// → luminous → dry, so L2 must be allowed to actually blaze; the default
+// treatment is tuned for dark footage and would bury a golden asset.
 const LEVEL_BG = [
   '/output/video/predator-shadow-loop.mp4',
-  null,
+  { src: '/output/video/golden-age-pixel-dawn-loop.mp4', tone: 'bright' },
   null,
 ];
 
@@ -546,15 +550,22 @@ function renderCutscene() {
     ? `<button class="vo-btn vo-btn--back vo-cutscene__back" data-action="back" data-fx="letters">← ${t('back')}</button>`
     : '';
 
-  const bgHtml = bgMarkup(LEVEL_BG[_levelIndex], 'vo-cutscene__bg');
+  const bgCfg  = LEVEL_BG[_levelIndex];
+  const bgSrc  = typeof bgCfg === 'string' ? bgCfg : bgCfg?.src;
+  const bgTone = typeof bgCfg === 'object' && bgCfg ? bgCfg.tone : null;
+  const bgHtml = bgMarkup(bgSrc, 'vo-cutscene__bg');
+  const bgClass = [
+    bgHtml ? 'vo-cutscene--media' : '',
+    bgTone === 'bright' ? 'vo-cutscene--bright' : '',
+  ].join(' ').trim();
 
   _overlay.innerHTML = `
-    <div class="vo-screen vo-cutscene ${bgHtml ? 'vo-cutscene--media' : ''}" data-level="${_levelIndex}">
+    <div class="vo-screen vo-cutscene ${bgClass}" data-level="${_levelIndex}">
       ${bgHtml}
       ${backBtn}
       <div class="vo-cutscene__content">
         <p class="vo-cutscene__level-tag" data-fx="letters" data-fx-delay="30">0${_levelIndex + 1} / 03</p>
-        <h2 class="vo-cutscene__title" data-fx="letters" data-fx-dir="top" data-fx-from="300" data-fx-to="900">${levelT('title')}</h2>
+        <h2 class="vo-cutscene__title" data-fx="letters" data-fx-dir="top" data-fx-from="300" data-fx-to="900" data-fx-wave>${levelT('title')}</h2>
         <p class="vo-cutscene__story" data-fx="words" data-fx-from="300" data-fx-to="700">${nl2br(levelT('story'))}</p>
       </div>
       <button class="vo-btn vo-btn--primary vo-cutscene__cta" data-action="continue" data-fx="letters">
