@@ -18,6 +18,7 @@ import { ExperimentSimulation } from './experiment-simulation.js';
 import { ExperimentCameraController } from './experiment-camera.js';
 import { createExperimentDebug } from './experiment-debug.js';
 import { TimeShortcutController } from './time-shortcuts.js';
+import { RadiusVisualizer } from './radius-visualizer.js';
 
 const startup = document.getElementById('startup-status');
 
@@ -266,6 +267,7 @@ async function bootstrap() {
     spawnRigidBody: (type, options) =>
       physics.spawnRigidBody(type, options),
   });
+  const radiusVisualizer = new RadiusVisualizer(scene);
   const timeShortcuts = new TimeShortcutController({
     setTimeScale(value) {
       stage.runtime.timeScale = value;
@@ -335,6 +337,7 @@ async function bootstrap() {
     renderer.render(scene, camera);
     cameraController.renderPreview();
     timeShortcuts.update(current.runtime.timeScale);
+    radiusVisualizer.update(simulation, current);
     debug.update(nowMs);
   });
   setStartup('Web 实验版已就绪', 'ready');

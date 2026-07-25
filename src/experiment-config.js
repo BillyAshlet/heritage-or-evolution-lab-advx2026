@@ -156,6 +156,10 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     targetCaptureRate: 3,
     captureLengthFactor: 0.5,
   },
+  debug: {
+    perceptionRadii: false,
+    combatRadii: false,
+  },
   captureVfx: {
     enabled: true,
     particleCount: 12,
@@ -693,6 +697,8 @@ const scalarEntries = [
     max: 1,
     step: 0.01,
   }),
+  entry('debug.perceptionRadii', '可视化', '0号鱼 · 同群三力半径', 'live'),
+  entry('debug.combatRadii', '可视化', '0号鱼 · 捕食/逃逸半径', 'live'),
   entry('capture.targetCaptureRate', '捕食', 'captures /s / school', 'live', {
     min: 0.05,
     max: 20,
