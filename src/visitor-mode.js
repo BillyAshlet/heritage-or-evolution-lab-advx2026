@@ -23,7 +23,7 @@ const TITLE_BG = '/output/video/inheritance-lab-loop.mp4';
 const LEVEL_BG = [
   '/output/video/predator-shadow-loop.mp4',
   { src: '/output/video/golden-age-pixel-dawn-loop.mp4', tone: 'bright' },
-  null,
+  '/output/video/drained-paradise-loop.mp4',
 ];
 
 // Builds <video>/<img> markup for a background slot. Videos are muted +
