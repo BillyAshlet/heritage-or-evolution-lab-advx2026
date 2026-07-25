@@ -37,7 +37,7 @@ test('config JSON round-trips without loss and validates atomically', () => {
   assert.equal(validateConfig(imported.config).valid, true);
   assert.throws(
     () => importConfigJson('{"runtime":{"seed":3}}'),
-    /至少需要两个鱼群/
+    /至少需要一个鱼群/
   );
 });
 

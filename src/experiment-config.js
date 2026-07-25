@@ -49,6 +49,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     timeScale: 1,
     fixedDt: 1 / 60,
     initialSpawnAttempts: 16,
+    spawnMode: 'random',
   },
   schools: [
     school({
@@ -369,6 +370,12 @@ const scalarEntries = [
       step: 1,
     }
   ),
+  entry('runtime.spawnMode', '运行', 'spawn mode', 'reset', {
+    options: {
+      '全缸随机': 'random',
+      '分团出生': 'cluster',
+    },
+  }),
   entry('tank.preset', '缸体', 'preset', 'rebuildScene', {
     options: {
       Aquarium: 'aquarium',
@@ -1216,8 +1223,8 @@ export function validateConfig(candidate) {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
     return { valid: false, errors: ['配置必须是对象'], warnings };
   }
-  if (!Array.isArray(candidate.schools) || candidate.schools.length < 2) {
-    errors.push('至少需要两个鱼群');
+  if (!Array.isArray(candidate.schools) || candidate.schools.length < 1) {
+    errors.push('至少需要一个鱼群');
     return { valid: false, errors, warnings };
   }
   let registry;

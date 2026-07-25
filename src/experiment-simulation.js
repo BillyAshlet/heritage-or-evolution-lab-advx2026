@@ -277,6 +277,7 @@ export class ExperimentSimulation {
     ) {
       const school = this.config.schools[schoolIndex];
       const range = this.schoolRanges[schoolIndex];
+      const spawnMode = this.config.runtime.spawnMode === 'cluster' ? 'cluster' : 'random';
       const center = [
         school.spawnRegion.centerX * this.config.tank.width,
         school.spawnRegion.centerY * this.config.tank.height,
@@ -296,33 +297,42 @@ export class ExperimentSimulation {
             this.config.capture.targetCaptureRate
           )
         : Infinity;
+      const wall = this.config.tank.wallMargin;
+      const half = [
+        this.config.tank.width / 2 - wall,
+        this.config.tank.height / 2 - wall,
+        this.config.tank.depth / 2 - wall,
+      ];
       for (let index = range.start; index < range.end; index += 1) {
-        const radius = school.spawnRegion.radius;
-        const wall = this.config.tank.wallMargin;
-        let spawn = center;
+        let spawn =
+          spawnMode === 'cluster'
+            ? center.slice()
+            : [
+                this.rng.range(-half[0], half[0]),
+                this.rng.range(-half[1], half[1]),
+                this.rng.range(-half[2], half[2]),
+              ];
         for (
           let attempt = 0;
           attempt < this.config.runtime.initialSpawnAttempts;
           attempt += 1
         ) {
-          const point = this.rng.inUnitSphere();
-          const candidate = [
-            clamp(
-              center[0] + point[0] * radius,
-              -this.config.tank.width / 2 + wall,
-              this.config.tank.width / 2 - wall
-            ),
-            clamp(
-              center[1] + point[1] * radius,
-              -this.config.tank.height / 2 + wall,
-              this.config.tank.height / 2 - wall
-            ),
-            clamp(
-              center[2] + point[2] * radius,
-              -this.config.tank.depth / 2 + wall,
-              this.config.tank.depth / 2 - wall
-            ),
-          ];
+          let candidate;
+          if (spawnMode === 'cluster') {
+            const point = this.rng.inUnitSphere();
+            const radius = school.spawnRegion.radius;
+            candidate = [
+              clamp(center[0] + point[0] * radius, -half[0], half[0]),
+              clamp(center[1] + point[1] * radius, -half[1], half[1]),
+              clamp(center[2] + point[2] * radius, -half[2], half[2]),
+            ];
+          } else {
+            candidate = [
+              this.rng.range(-half[0], half[0]),
+              this.rng.range(-half[1], half[1]),
+              this.rng.range(-half[2], half[2]),
+            ];
+          }
           spawn = candidate;
           if (
             sceneClearance(candidate, this.config) >
@@ -338,11 +348,17 @@ export class ExperimentSimulation {
           spawn[1],
           spawn[2]
         );
-        const jitter = this.rng.unitVector();
-        const hx = heading[0] + jitter[0] * 0.16;
-        const hy = heading[1] + jitter[1] * 0.16;
-        const hz = heading[2] + jitter[2] * 0.16;
-        const direction = normalize3(hx, hy, hz);
+        let direction;
+        if (spawnMode === 'cluster') {
+          const jitter = this.rng.unitVector();
+          direction = normalize3(
+            heading[0] + jitter[0] * 0.16,
+            heading[1] + jitter[1] * 0.16,
+            heading[2] + jitter[2] * 0.16
+          );
+        } else {
+          direction = this.rng.unitVector();
+        }
         set3(
           this.velocities,
           index,

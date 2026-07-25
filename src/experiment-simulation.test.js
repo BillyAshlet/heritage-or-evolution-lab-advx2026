@@ -196,6 +196,36 @@ test('seeded initial simulation state is reproducible', () => {
   assert.notDeepEqual([...a.positions], [...c.positions]);
 });
 
+test('random spawn scatters fish across the tank instead of school clusters', () => {
+  const simulation = smallSimulation('steady', 4242);
+  assert.equal(simulation.config.runtime.spawnMode, 'random');
+  const halfW = simulation.config.tank.width / 2;
+  const xs = [];
+  for (let i = 0; i < simulation.count; i += 1) {
+    xs.push(simulation.positions[i * 3]);
+  }
+  const spread = Math.max(...xs) - Math.min(...xs);
+  assert.ok(spread > halfW, `expected wide random spread, got ${spread}`);
+
+  const clustered = smallSimulation('steady', 4242);
+  clustered.config.runtime.spawnMode = 'cluster';
+  clustered.reset(4242);
+  const school = clustered.config.schools[0];
+  const centerX = school.spawnRegion.centerX * clustered.config.tank.width;
+  let maxDist = 0;
+  const range = clustered.schoolRanges[0];
+  for (let i = range.start; i < range.end; i += 1) {
+    const dx = clustered.positions[i * 3] - centerX;
+    const dy = clustered.positions[i * 3 + 1];
+    const dz = clustered.positions[i * 3 + 2];
+    maxDist = Math.max(maxDist, Math.hypot(dx, dy, dz));
+  }
+  assert.ok(
+    maxDist <= school.spawnRegion.radius + 1e-6,
+    `cluster spawn escaped radius: ${maxDist}`
+  );
+});
+
 test('ecology capture restores predator energy', () => {
   const simulation = smallSimulation('ecology');
   const prey = 0;

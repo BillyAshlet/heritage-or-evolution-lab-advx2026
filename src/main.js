@@ -254,8 +254,8 @@ async function bootstrap() {
       return this.applyConfig('rebuildScene');
     },
     removeSchool(index = stage.schools.length - 1) {
-      if (stage.schools.length <= 2) {
-        throw new Error('至少保留两个鱼群');
+      if (stage.schools.length <= 1) {
+        throw new Error('至少保留一个鱼群');
       }
       const safeIndex = Math.max(
         0,
