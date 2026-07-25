@@ -64,7 +64,10 @@ function deepFreeze(value) {
 function createLevelSpec({
   id,
   label,
+  title,
   story,
+  verdictWin,
+  verdictLose,
   durationSec,
   winSurvivalPct,
   plankton,
@@ -77,7 +80,12 @@ function createLevelSpec({
   return deepFreeze({
     id,
     label,
+    // title 覆盖 label 用于大标题显示（game-ui 已支持 title ?? label）；
+    // label 保留为后备与紧凑位显示。verdictWin/Lose 是每关专属结算文案。
+    title,
     story,
+    verdictWin,
+    verdictLose,
     durationSec,
     winSurvivalPct,
     plankton: { enabled: true, ...plankton },
@@ -97,7 +105,11 @@ function createLevelSpec({
 export const LEVEL_1_SPEC = createLevelSpec({
   id: 'L1',
   label: '第一代 · 匮乏年代',
-  story: '捕食者环伺，浮游只够勉强充饥。活下来比壮大更重要。',
+  title: '共工怒触不周山，天倾西北，地陷东南',
+  story: '天既以倾，何以为北？\n泥土，饥饿与画饼充饥。',
+  // 胜也不许庆祝：第二句就是继承机制的声明。
+  verdictWin: '天终未补，而你们活着。\n活下来的方式，会变成活下去的方式。',
+  verdictLose: '地陷东南，你们随之而下。',
   durationSec: 90,
   // 35% 仍是三关最低胜线，但会挡住首代极端缩体留下的 L2 软锁。
   winSurvivalPct: 35,
@@ -149,7 +161,13 @@ export const LEVEL_1_SPEC = createLevelSpec({
 export const LEVEL_2_SPEC = createLevelSpec({
   id: 'L2',
   label: '第二代 · 黄金时代',
-  story: '浮游见底，少量捕食者之外出现了与你原本平行的鱼群。',
+  title: '这是最好的时代，这是最坏的时代',
+  story: '水既已涨，何以为岸？\n吞咽，膨胀，与来不及计算的重量。',
+  // 全场唯一一次让玩家飘。第二句在最得意时埋债：
+  // 风是时代，翅膀是你调大的体型——风会停，翅膀不会缩回去。
+  verdictWin:
+    '鹏之徙于南冥也，水击三千里，抟扶摇而上者九万里，去以六月息者也。\n风停时，翅膀还在。',
+  verdictLose: '最好的时代没有等你。',
   durationSec: 75,
   winSurvivalPct: 75,
   plankton: {
@@ -212,7 +230,11 @@ export const LEVEL_2_SPEC = createLevelSpec({
 export const LEVEL_3_SPEC = createLevelSpec({
   id: 'L3',
   label: '第三代 · 后疫情时代',
-  story: '食物与猎食者都已稀少，整个生态降低活动，耐力决定谁能熬到最后。',
+  title: '昔为东海之波臣，今困于车辙之中',
+  story: '水既已涸，何以为继？\n等待，蛰伏，与远水解不了的近渴。',
+  // 败句是庄子原文的收尾，本身就是一句 game over。
+  verdictWin: '斗升之水，足以活我。\n你留下的不是繁盛，是一条还在喘气的血脉。',
+  verdictLose: '不如早索我于枯鱼之肆。\n远水终于来了，河床上已经没有鱼。',
   durationSec: 105,
   winSurvivalPct: 50,
   plankton: {
