@@ -37,12 +37,28 @@
     #lab-mark,
     #startup-status,
     #experiment-dashboard,
-    #fish-inspector,
-    #fish-view-hud,
-    #time-shortcut-hud,
     #enable-tilt
   ) {
   display: none !important;
+}
+
+/* 观察窗/视角 HUD/变速 HUD 在 game 模式保留，且必须浮在 GameUI（z 30）
+   之上才能点到。顶部中央被扇形钟面占用，变速 HUD 改坠底部中央。 */
+#app[data-project="game"] #fish-inspector,
+#app[data-project="game"] #fish-view-hud,
+#app[data-project="game"] #time-shortcut-hud {
+  z-index: 31;
+}
+#app[data-project="game"] #time-shortcut-hud {
+  top: auto;
+  bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* 特写/跟随全屏时收起档案面板，只留钟面和 ESC 提示。 */
+#app:is([data-camera-mode="closeup"], [data-camera-mode="follow"])
+  :is(.game-ui__layout, .game-ui__wash) {
+  opacity: 0;
+  pointer-events: none;
 }
 
 #game-ui-root *,
@@ -59,6 +75,143 @@
     linear-gradient(270deg, rgba(244, 239, 230, 0.84), transparent 42%);
   opacity: 0.7;
   pointer-events: none;
+}
+
+/* 扇形钟面倒计时 —— 画面顶部中央悬浮，剩余扇区随时间被吃掉。 */
+.game-ui__clock {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.game-ui__clock[hidden] {
+  display: none;
+}
+
+/* 钟面本体是个按钮：点击展开下方测试拉伸栏。 */
+.game-ui__clock-button {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.game-ui__clock-button:focus-visible {
+  outline: 2px solid var(--game-blue);
+  outline-offset: 4px;
+}
+
+/* 测试拉伸栏：从钟面下沿横向拉开，栏开着时按空格直接结算本关。 */
+.game-ui__clock-drawer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border: 1px solid var(--game-rule-strong);
+  background: var(--game-paper);
+  color: var(--game-muted);
+  font: 600 11px/1.5 var(--game-mono);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  pointer-events: auto;
+  transform-origin: top center;
+  animation: game-ui-drawer-stretch 180ms ease-out;
+}
+
+.game-ui__clock-drawer[hidden] {
+  display: none;
+}
+
+.game-ui__clock-drawer kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--game-rule-strong);
+  border-bottom-width: 2px;
+  background: var(--game-blue-soft);
+  color: var(--game-blue);
+  font: 700 10px/1.5 var(--game-mono);
+}
+
+@keyframes game-ui-drawer-stretch {
+  from {
+    transform: scaleX(0.2);
+    opacity: 0;
+  }
+}
+
+.game-ui__clock svg {
+  width: 76px;
+  height: 76px;
+  filter: drop-shadow(0 8px 22px rgba(41, 63, 77, 0.22));
+}
+
+.game-ui__clock-face {
+  fill: var(--game-paper);
+  stroke: var(--game-rule-strong);
+  stroke-width: 1.6;
+}
+
+.game-ui__clock-ticks line {
+  stroke: var(--game-rule);
+  stroke-width: 1.4;
+}
+
+.game-ui__clock-ticks line.game-ui__clock-tick--cardinal {
+  stroke: var(--game-rule-strong);
+  stroke-width: 2;
+}
+
+.game-ui__clock-sector {
+  fill: var(--game-blue);
+  fill-opacity: 0.82;
+  transition: fill 300ms ease;
+}
+
+.game-ui__clock-pin {
+  fill: var(--game-ink);
+}
+
+.game-ui__clock-time {
+  padding: 2px 8px;
+  border: 1px solid var(--game-rule-strong);
+  background: var(--game-paper);
+  color: var(--game-ink);
+  font: 650 13px/1.4 var(--game-mono);
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* TUNING 中倒计时不推进，钟面满格但压暗，避免误读为已开始。 */
+.game-ui[data-phase="tuning"] .game-ui__clock {
+  opacity: 0.55;
+}
+
+.game-ui__clock[data-urgent="true"] .game-ui__clock-sector {
+  fill: var(--game-rust);
+  animation: game-ui-clock-pulse 1s ease-in-out infinite;
+}
+
+.game-ui__clock[data-urgent="true"] .game-ui__clock-time {
+  border-color: var(--game-rust);
+  color: var(--game-rust);
+}
+
+@keyframes game-ui-clock-pulse {
+  50% {
+    fill-opacity: 0.4;
+  }
 }
 
 .game-ui__layout {

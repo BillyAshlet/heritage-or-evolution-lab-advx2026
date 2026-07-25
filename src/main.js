@@ -329,8 +329,13 @@ async function bootstrap() {
     } else {
       delete app.dataset.gameAttemptSeed;
     }
-    timeShortcuts?.setEnabled(!isGame && !visitorBlocking);
-    cameraController.setInteractionEnabled(!isGame && !visitorBlocking);
+    timeShortcuts?.setEnabled(
+      !visitorBlocking &&
+        (!isGame || gameSession.phase === GAME_PHASE.RUNNING)
+    );
+    // 点鱼观察窗链路在 game 模式同样开放（单击鱼 → 观察窗 → 特写/跟随
+    // → ESC/双击空格回全局），只在游客壳遮挡时禁用。
+    cameraController.setInteractionEnabled(!visitorBlocking);
     simulation.setLocomotionPreview(
       isGame && gameSession.phase === GAME_PHASE.TUNING
     );
@@ -562,7 +567,7 @@ async function bootstrap() {
     },
     onContinue() {
       if (gameSession.phase === GAME_PHASE.VERDICT) {
-        if (!gameSession.verdict?.won) return;
+        // 单次判定：胜负都封代继续，失败不再卡在本关。
         gameSession.sealGeneration();
         renderGameUi(performance.now(), true);
         return;
@@ -593,6 +598,16 @@ async function bootstrap() {
       debug.rebuildPane();
       renderGameUi(performance.now(), true);
       visitorUI?.showTitle();
+    },
+    onSkipLevel() {
+      // 测试后门：钟面拉伸栏打开时按空格，按当前存活状态立即结算本关。
+      if (
+        current.runtime.project !== 'game' ||
+        gameSession.phase !== GAME_PHASE.RUNNING
+      ) {
+        return;
+      }
+      settleGameLevel(simulation.metrics());
     },
   });
 
@@ -648,6 +663,19 @@ async function bootstrap() {
   });
   window.experiment = experimentApi;
 
+  // 把当前 RUNNING 局面直接写成本关判定：倒计时自然结束、蓝鱼提前
+  // 灭绝和测试跳关后门共用同一条结算路径。
+  function settleGameLevel(metrics) {
+    stage.runtime.timeScale = 0;
+    controller.applyConfig('live', 'runtime.timeScale');
+    gameSession.finishLevel(gameRoundReport(metrics));
+    // 结算时退出特写/跟随全屏，否则结算面板会盖在鱼视角上；
+    // 同步展示态以关闭变速快捷键（否则 VERDICT 中松开 Enter 会把
+    // timeScale 写回 1，模拟在结算屏背后继续跑）。
+    cameraController.exitView(true);
+    syncProjectPresentation(true);
+  }
+
   function finishGameLevelIfNeeded(metrics) {
     if (
       current.runtime.project !== 'game' ||
@@ -662,10 +690,7 @@ async function bootstrap() {
       metrics.elapsed + 1e-9 >= gameSession.currentLevel.durationSec;
     if (!timedOut && (player?.alive ?? 0) > 0) return false;
 
-    stage.runtime.timeScale = 0;
-    controller.applyConfig('live', 'runtime.timeScale');
-    gameSession.finishLevel(gameRoundReport(metrics));
-    renderGameUi(performance.now(), true);
+    settleGameLevel(metrics);
     return true;
   }
 

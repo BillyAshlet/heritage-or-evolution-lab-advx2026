@@ -954,11 +954,10 @@ export class GameSession {
     return this.barycentric;
   }
 
+  // 单次判定：胜负都封代。失败的世代同样写入谱系（verdict.won=false），
+  // 系数照样累乘进下一代——时间不会回头，代价由后代承担。
   sealGeneration() {
     assertPhase(this.#phase, GAME_PHASE.VERDICT);
-    if (!this.#verdict.won) {
-      throw new Error('a failed level cannot create a generation record');
-    }
     const record = deepFreeze({
       gen: this.#lineage.length + 1,
       barycentric: { ...this.#submittedBarycentric },

@@ -42,7 +42,7 @@ const PHASE_COPY = Object.freeze({
   },
   verdict: {
     label: "本代结算",
-    instruction: "本代实验已经结束。结果将决定这组系数能否累乘给下一代。",
+    instruction: "本代实验已经结束。无论胜负，这组系数都会累乘进下一代。",
   },
   inherit: {
     label: "代际封存",
@@ -93,6 +93,43 @@ function formatTime(seconds) {
   const remainder = safeSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
+
+// 扇形钟面：已消耗的时间从 12 点顺时针被“吃掉”，剩余扇区代表剩余时间。
+const CLOCK_RADIUS = 33;
+
+function clockSectorPath(fraction) {
+  const remaining = clamp(asNumber(fraction), 0, 1);
+  if (remaining <= 0) return "";
+  const top = 50 - CLOCK_RADIUS;
+  if (remaining >= 1) {
+    // 满盘：用两段半弧拼整圆，避免起终点重合时弧线坑掉。
+    return (
+      `M 50 ${top} ` +
+      `A ${CLOCK_RADIUS} ${CLOCK_RADIUS} 0 1 1 50 ${50 + CLOCK_RADIUS} ` +
+      `A ${CLOCK_RADIUS} ${CLOCK_RADIUS} 0 1 1 50 ${top} Z`
+    );
+  }
+  const startAngle = -Math.PI / 2 + (1 - remaining) * Math.PI * 2;
+  const startX = 50 + CLOCK_RADIUS * Math.cos(startAngle);
+  const startY = 50 + CLOCK_RADIUS * Math.sin(startAngle);
+  const largeArc = remaining > 0.5 ? 1 : 0;
+  return (
+    `M 50 50 L ${startX.toFixed(3)} ${startY.toFixed(3)} ` +
+    `A ${CLOCK_RADIUS} ${CLOCK_RADIUS} 0 ${largeArc} 1 50 ${top} Z`
+  );
+}
+
+const CLOCK_TICKS = Array.from({ length: 12 }, (_, index) => {
+  const angle = (index / 12) * Math.PI * 2 - Math.PI / 2;
+  const isCardinal = index % 3 === 0;
+  const outer = 44;
+  const inner = isCardinal ? 38 : 41;
+  const x1 = (50 + inner * Math.cos(angle)).toFixed(3);
+  const y1 = (50 + inner * Math.sin(angle)).toFixed(3);
+  const x2 = (50 + outer * Math.cos(angle)).toFixed(3);
+  const y2 = (50 + outer * Math.sin(angle)).toFixed(3);
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"${isCardinal ? ' class="game-ui__clock-tick--cardinal"' : ""}></line>`;
+}).join("");
 
 function normalizePhase(phase) {
   const normalized = String(phase ?? "tuning").trim().toLowerCase();
@@ -146,6 +183,7 @@ function makeElement(tagName, className, text) {
  * - onTriangleInput({ size, stamina, speed }) where values are barycentric
  *   weights that are non-negative and total exactly 1.
  * - onStart(), onRetry(), onContinue(), onRestart(), onExit()
+ * - onSkipLevel() —— 钟面拉伸栏的测试后门，栏打开时按空格触发
  */
 export class GameUI {
   constructor({
@@ -156,6 +194,7 @@ export class GameUI {
     onContinue,
     onRestart,
     onExit,
+    onSkipLevel,
   } = {}) {
     if (!(root instanceof HTMLElement)) {
       throw new TypeError("GameUI requires an HTMLElement root.");
@@ -169,6 +208,7 @@ export class GameUI {
       onContinue,
       onRestart,
       onExit,
+      onSkipLevel,
     };
     this.disposed = false;
     this.draggingPointerId = null;
@@ -184,6 +224,21 @@ export class GameUI {
     this.root.setAttribute("aria-labelledby", "game-ui-level-title");
     this.root.innerHTML = `
       <div class="game-ui__wash" aria-hidden="true"></div>
+      <div class="game-ui__clock" hidden>
+        <button class="game-ui__clock-button" type="button" aria-expanded="false" title="展开测试拉伸栏">
+          <svg viewBox="0 0 100 100" focusable="false" aria-hidden="true">
+            <circle class="game-ui__clock-face" cx="50" cy="50" r="46"></circle>
+            <g class="game-ui__clock-ticks">${CLOCK_TICKS}</g>
+            <path class="game-ui__clock-sector" d=""></path>
+            <circle class="game-ui__clock-pin" cx="50" cy="50" r="2.2"></circle>
+          </svg>
+          <strong class="game-ui__clock-time" role="timer" aria-label="剩余观察时间">00:00</strong>
+        </button>
+        <div class="game-ui__clock-drawer" hidden>
+          <kbd>SPACE</kbd>
+          <span>跳过本关 · 测试</span>
+        </div>
+      </div>
       <div class="game-ui__layout">
         <aside class="game-ui__lineage-rail" aria-label="三代演化时间轨">
           <header class="game-ui__rail-header">
@@ -376,6 +431,11 @@ export class GameUI {
     `;
 
     this.elements = {
+      clock: this.root.querySelector(".game-ui__clock"),
+      clockButton: this.root.querySelector(".game-ui__clock-button"),
+      clockDrawer: this.root.querySelector(".game-ui__clock-drawer"),
+      clockSector: this.root.querySelector(".game-ui__clock-sector"),
+      clockTime: this.root.querySelector(".game-ui__clock-time"),
       lineageList: this.root.querySelector(".game-ui__lineage-list"),
       specimenId: this.root.querySelector(".game-ui__specimen-id"),
       phaseLabel: this.root.querySelector(".game-ui__phase-label"),
@@ -526,7 +586,36 @@ export class GameUI {
       );
     };
 
+    this.handleClockToggle = () => {
+      if (this.disposed) return;
+      this.#setSkipDrawer(this.elements.clockDrawer.hidden);
+    };
+
+    // 拉伸栏打开时，空格是“跳过本关”的测试后门：在捕获阶段拦截，
+    // 避免同一次按键又触发 0.2× 慢速快捷键或聚焦按钮的默认激活。
+    this.handleSkipKeyDown = (event) => {
+      if (
+        this.disposed ||
+        this.root.hidden ||
+        this.elements.clockDrawer.hidden ||
+        event.repeat ||
+        !(event.code === "Space" || event.key === " ")
+      ) {
+        return;
+      }
+      if (this.phase !== "running") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.#setSkipDrawer(false);
+      this.callbacks.onSkipLevel?.();
+    };
+
     this.root.addEventListener("click", this.handleClick);
+    this.elements.clockButton.addEventListener(
+      "click",
+      this.handleClockToggle,
+    );
+    window.addEventListener("keydown", this.handleSkipKeyDown, true);
     this.elements.triangleSurface.addEventListener(
       "pointerdown",
       this.handlePointerDown,
@@ -551,6 +640,11 @@ export class GameUI {
       "keydown",
       this.handleTriangleKeyDown,
     );
+  }
+
+  #setSkipDrawer(open) {
+    this.elements.clockDrawer.hidden = !open;
+    this.elements.clockButton.setAttribute("aria-expanded", String(open));
   }
 
   #updateFromPointer(event) {
@@ -727,18 +821,14 @@ export class GameUI {
       return;
     }
     if (this.phase === "verdict") {
-      if (!won) {
-        this.elements.retry.hidden = false;
-        // A successful earlier choice can still leave a later generation
-        // without a viable route. Keep the ordinary same-level retry, but
-        // also offer an explicit lineage reset instead of trapping the player.
-        if (this.levelIndex > 0) this.elements.restart.hidden = false;
-      } else {
-        this.elements.continue.textContent = isLastLevel
-          ? "封存最终一代"
-          : "封存本代遗产";
-        this.elements.continue.hidden = false;
-      }
+      // 单次判定：胜负都只判一次，失败也封代继续。不提供同关重试，
+      // 避免展台演示卡在某一代。
+      this.elements.continue.textContent = isLastLevel
+        ? "封存最终一代"
+        : won
+          ? "封存本代遗产"
+          : "带着代价进入下一代";
+      this.elements.continue.hidden = false;
     }
   }
 
@@ -837,6 +927,22 @@ export class GameUI {
     this.elements.population.textContent =
       `${formatInteger(survivors)} / ${formatInteger(initial)} 尾`;
     this.elements.time.textContent = formatTime(timeRemaining);
+
+    // 扇形钟面：TUNING 中满格静止（elapsed 不推进），RUNNING 中随倒计时
+    // 被消耗，结算后隐藏。最后 10 秒转入紧急态。
+    this.elements.clock.hidden = showResult;
+    if (showResult) this.#setSkipDrawer(false);
+    if (!showResult) {
+      const remainingFraction = duration > 0 ? timeRemaining / duration : 0;
+      this.elements.clockSector.setAttribute(
+        "d",
+        clockSectorPath(remainingFraction),
+      );
+      this.elements.clockTime.textContent = formatTime(timeRemaining);
+      this.elements.clock.dataset.urgent = String(
+        this.phase === "running" && timeRemaining > 0 && timeRemaining <= 10,
+      );
+    }
     this.elements.duration.textContent = `本代共 ${formatTime(duration)}`;
     this.elements.threshold.textContent = `≥ ${formatPercent(threshold)}`;
     this.elements.survivalBar.style.width = `${survivalPct}%`;
@@ -880,7 +986,7 @@ export class GameUI {
           ? isLastLevel
             ? "最后一代已经完成观察，三次选择已累积为整条谱系的记录。"
             : "本代累计系数将写入谱系，成为下一代的遗传底本。"
-          : "失败不会形成新一代。保留本次方向，回到本关重新调整。");
+          : "时间不会回头。这代的选择仍将写入谱系，由下一代承担。");
       this.elements.deathEaten.textContent = formatInteger(
         deaths.eaten ?? deaths.captured,
       );
@@ -909,6 +1015,11 @@ export class GameUI {
     if (this.disposed) return;
     this.disposed = true;
     this.root.removeEventListener("click", this.handleClick);
+    this.elements.clockButton.removeEventListener(
+      "click",
+      this.handleClockToggle,
+    );
+    window.removeEventListener("keydown", this.handleSkipKeyDown, true);
     this.elements.triangleSurface.removeEventListener(
       "pointerdown",
       this.handlePointerDown,

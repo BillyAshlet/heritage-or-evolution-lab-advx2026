@@ -434,18 +434,37 @@ test('GameSession locks triangle input and rejects illegal transitions', () => {
   );
 });
 
-test('failure preserves the round point but not cumulative inheritance', () => {
+test('a failed level still seals its generation and advances the lineage', () => {
   const session = new GameSession();
   session.setBarycentric(STAMINA_VERTEX);
   session.startLevel();
   const failed = session.finishLevel(reportAt(7));
   assert.equal(failed.won, false);
-  assert.throws(() => session.sealGeneration(), /failed level/);
+
+  const record = session.sealGeneration();
+  assert.equal(record.verdict.won, false);
+  assert.deepEqual(record.cumulativeBefore, IDENTITY_COEFFICIENTS);
+  assert.deepEqual(record.cumulativeAfter, {
+    size: 0.5,
+    stamina: 1.5,
+    speed: 0.5,
+  });
+  assert.equal(session.lineage.length, 1);
   assert.deepEqual(
     session.inheritedCoefficients,
-    IDENTITY_COEFFICIENTS
+    record.cumulativeAfter
   );
-  assert.equal(session.lineage.length, 0);
+
+  session.advanceLevel();
+  assert.equal(session.currentLevel.id, 'L2');
+  assert.deepEqual(session.barycentric, NEUTRAL_BARYCENTRIC_POINT);
+});
+
+test('retryLevel keeps the round point without touching inheritance', () => {
+  const session = new GameSession();
+  session.setBarycentric(STAMINA_VERTEX);
+  session.startLevel();
+  session.finishLevel(reportAt(7));
 
   const retained = session.retryLevel();
   assert.deepEqual(retained, STAMINA_VERTEX);
@@ -453,6 +472,7 @@ test('failure preserves the round point but not cumulative inheritance', () => {
     session.inheritedCoefficients,
     IDENTITY_COEFFICIENTS
   );
+  assert.equal(session.lineage.length, 0);
   assert.deepEqual(session.previewCumulative, {
     size: 0.5,
     stamina: 1.5,
