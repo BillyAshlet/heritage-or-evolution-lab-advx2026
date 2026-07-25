@@ -1593,6 +1593,12 @@ export class ExperimentSimulation {
         alive: this.aliveCount(index),
         target: this.derived.schools[index].count,
         neighborRadius: this.derived.schools[index].neighborRadius,
+        separationRadius:
+          this.derived.schools[index].separationRadius,
+        alignmentRadius:
+          this.derived.schools[index].alignmentRadius,
+        cohesionRadius:
+          this.derived.schools[index].cohesionRadius,
         detectionLength: this.derived.schools[index].detectionLength,
         measuredNeighbors: this.averageNeighbors(index),
         averageEnergy: this.averageEnergy(index),

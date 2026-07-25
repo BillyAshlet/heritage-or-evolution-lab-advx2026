@@ -73,11 +73,11 @@ const PROJECTS = {
   },
 };
 
-const SCHOOL_SECTIONS = [
+export const SCHOOL_SECTIONS = [
   {
     title: '身份与形态',
     expanded: true,
-    fields: ['id', 'name', 'color', 'count', 'size', 'targetNeighbors'],
+    fields: ['id', 'name', 'color', 'count', 'size'],
   },
   {
     title: '运动',
@@ -90,13 +90,26 @@ const SCHOOL_SECTIONS = [
     fields: ['grazeRate'],
   },
   {
-    title: '群游',
+    title: '分离 · Separation',
     expanded: false,
-    fields: [
-      'separationWeight',
-      'alignmentWeight',
-      'cohesionWeight',
-    ],
+    fields: ['separationWeight'],
+    derivedRadius: 'separationRadius',
+    globalPaths: ['perception.separationRadiusFactor'],
+  },
+  {
+    title: '对齐 · Alignment',
+    expanded: false,
+    fields: ['alignmentWeight'],
+    derivedRadius: 'alignmentRadius',
+    globalPaths: ['perception.alignmentRadiusFactor'],
+  },
+  {
+    title: '凝聚 · Cohesion',
+    expanded: false,
+    fields: ['targetNeighbors', 'cohesionWeight'],
+    derivedRadius: 'cohesionRadius',
+    globalPaths: ['perception.globalCohesionFactor'],
+    globalAfterFields: true,
   },
   {
     title: '出生布局',
@@ -104,6 +117,10 @@ const SCHOOL_SECTIONS = [
     fields: ['spawnRegion', 'initialHeading'],
   },
 ];
+
+export const SCHOOL_EMBEDDED_GLOBAL_PATHS = new Set(
+  SCHOOL_SECTIONS.flatMap((section) => section.globalPaths ?? [])
+);
 
 const CASCADE_GROUPS = new Set([
   'Holding / Cascade',
@@ -183,6 +200,8 @@ export function createExperimentDebug({
   let releaseButton = null;
   let roleState = null;
   let roleBindings = [];
+  let boidState = null;
+  let boidBindings = [];
   const rangeWindows = new Map();
   const defaultConfig = createDefaultConfig();
   const holder = document.getElementById('panel-holder');
@@ -500,18 +519,6 @@ export function createExperimentDebug({
     return binding;
   }
 
-  function schoolSectionFor(spec, prefix) {
-    const relative = spec.path.slice(prefix.length);
-    return (
-      SCHOOL_SECTIONS.find((section) =>
-        section.fields.some(
-          (field) =>
-            relative === field || relative.startsWith(`${field}.`)
-        )
-      ) ?? SCHOOL_SECTIONS.at(-1)
-    );
-  }
-
   function addSchoolEditor(root, registry) {
     selectedSchoolIndex = Math.max(
       0,
@@ -581,21 +588,55 @@ export function createExperimentDebug({
         readonly: true,
       }),
     ];
+    boidState = {
+      separationRadius: '—',
+      alignmentRadius: '—',
+      cohesionRadius: '—',
+    };
+    boidBindings = [];
 
     const prefix = `schools.${selectedSchoolIndex}.`;
     const specs = registry.filter((spec) => spec.path.startsWith(prefix));
-    const folders = new Map();
-    for (const spec of specs) {
-      const section = schoolSectionFor(spec, prefix);
-      let folder = folders.get(section.title);
-      if (!folder) {
-        folder = editor.addFolder({
-          title: section.title,
-          expanded: section.expanded,
-        });
-        folders.set(section.title, folder);
+    for (const section of SCHOOL_SECTIONS) {
+      const sectionSpecs = specs.filter((spec) => {
+        const relative = spec.path.slice(prefix.length);
+        return section.fields.some(
+          (field) =>
+            relative === field || relative.startsWith(`${field}.`)
+        );
+      });
+      if (
+        sectionSpecs.length === 0 &&
+        !section.derivedRadius &&
+        !section.globalPaths?.length
+      ) {
+        continue;
       }
-      bindSpec(folder, spec);
+      const folder = editor.addFolder({
+        title: section.title,
+        expanded: section.expanded,
+      });
+      if (section.derivedRadius) {
+        boidBindings.push(
+          folder.addBinding(boidState, section.derivedRadius, {
+            label: 'actual radius',
+            readonly: true,
+          })
+        );
+      }
+      if (!section.globalAfterFields) {
+        for (const path of section.globalPaths ?? []) {
+          const globalSpec = registry.find((spec) => spec.path === path);
+          if (globalSpec) bindSpec(folder, globalSpec);
+        }
+      }
+      for (const spec of sectionSpecs) bindSpec(folder, spec);
+      if (section.globalAfterFields) {
+        for (const path of section.globalPaths ?? []) {
+          const globalSpec = registry.find((spec) => spec.path === path);
+          if (globalSpec) bindSpec(folder, globalSpec);
+        }
+      }
     }
   }
 
@@ -606,6 +647,7 @@ export function createExperimentDebug({
       if (
         spec.path.startsWith('schools.') ||
         spec.path === 'runtime.project' ||
+        SCHOOL_EMBEDDED_GLOBAL_PATHS.has(spec.path) ||
         !groupVisible(project, spec.group)
       ) {
         continue;
@@ -749,7 +791,14 @@ export function createExperimentDebug({
       .join(' · ');
     roleState.derived =
       `size ${school.size.toFixed(2)} · r ${school.neighborRadius.toFixed(3)}`;
+    boidState.separationRadius =
+      school.separationRadius.toFixed(3);
+    boidState.alignmentRadius =
+      school.alignmentRadius.toFixed(3);
+    boidState.cohesionRadius =
+      school.cohesionRadius.toFixed(3);
     for (const binding of roleBindings) binding.refresh();
+    for (const binding of boidBindings) binding.refresh();
   }
 
   function update(nowMs) {

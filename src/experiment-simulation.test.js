@@ -31,8 +31,12 @@ function smallSimulation(mode = 'cascade', seed = 1001, withScene = false) {
 
 test('headless simulation does not require a THREE.Scene adapter', () => {
   const simulation = smallSimulation();
+  const school = simulation.metrics().population[0];
   assert.equal(simulation.mesh, null);
   assert.equal(simulation.captureVfx, null);
+  assert.equal(school.cohesionRadius, school.neighborRadius);
+  assert.ok(school.alignmentRadius < school.separationRadius);
+  assert.ok(school.separationRadius < school.cohesionRadius);
   simulation._advance(1 / 60);
   assert.ok(simulation.elapsed > 0);
 });

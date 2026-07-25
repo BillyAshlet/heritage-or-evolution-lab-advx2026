@@ -98,6 +98,16 @@ capture。威胁由有效关系中的捕食者进入邻近范围触发，与目�
 数量鱼群形成的实时食物网。鱼群编辑器一次只展示一个群体：
 使用前后箭头切换，通过加减按钮增删；形态、运动、群游和出生参数在该鱼群
 内部分类。编辑器同时显示该群当前自动角色及其对其他鱼群的派生关系。
+三个核心 Boid 规则分别使用独立面板栏：每栏依次显示当前鱼群的实际
+`radius`、半径控制项和 `weight`。radius 决定纳入哪些邻居，weight 决定
+对这些邻居施加多强的转向。Cohesion radius 等于按数量、缸体积和
+`targetNeighbors` 动态反推的 `neighborRadius`，因此不伪造额外固定倍率。
+
+`wallMargin` 是鱼心的硬边界内缩，并参与缸壁 collider 厚度；`edgeSoftness`
+是到缸壁或静态障碍的软转向带，距离越近斥力越强。`crossSeparationScale`
+只控制不同鱼群之间按较大体型缩放的连续斥力半径，不参与捕食关系判断。
+`globalCohesionFactor` 乘以当前鱼群的 cohesion weight，把个体拉向实时
+全群群心，作为局部凝聚看不到邻居时的防走失兜底；数值过大会压制分裂。
 
 ### Cascade Mode
 

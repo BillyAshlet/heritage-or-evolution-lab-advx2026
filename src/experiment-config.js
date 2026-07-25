@@ -412,16 +412,28 @@ const scalarEntries = [
     max: 2.5,
     step: 0.05,
   }),
-  entry('tank.wallMargin', 'Advanced · Tank', 'wall margin', 'live', {
-    min: 0,
-    max: 0.2,
-    step: 0.005,
-  }),
-  entry('tank.edgeSoftness', 'Advanced · Tank', 'edge softness', 'live', {
-    min: 0.02,
-    max: 0.5,
-    step: 0.01,
-  }),
+  entry(
+    'tank.wallMargin',
+    'Advanced · Tank',
+    'wall margin · 硬边界',
+    'live',
+    {
+      min: 0,
+      max: 0.2,
+      step: 0.005,
+    }
+  ),
+  entry(
+    'tank.edgeSoftness',
+    'Advanced · Tank',
+    'edge softness · 软转向带',
+    'live',
+    {
+      min: 0.02,
+      max: 0.5,
+      step: 0.01,
+    }
+  ),
   entry(
     'perception.minNeighborRadiusFactor',
     '感知',
@@ -432,14 +444,14 @@ const scalarEntries = [
   entry(
     'perception.alignmentRadiusFactor',
     '感知',
-    'alignment radius ×',
+    'radius ×（全局）',
     'live',
     { min: 0.05, max: 1, step: 0.01 }
   ),
   entry(
     'perception.separationRadiusFactor',
     '感知',
-    'separation radius ×',
+    'radius ×（全局）',
     'live',
     { min: 0.05, max: 1, step: 0.01 }
   ),
@@ -452,15 +464,15 @@ const scalarEntries = [
   ),
   entry(
     'perception.crossSeparationScale',
-    '感知',
-    'cross separation / size',
+    '跨鱼群作用',
+    'cross separation radius / size',
     'live',
     { min: 0.02, max: 0.5, step: 0.01 }
   ),
   entry(
     'perception.globalCohesionFactor',
     '感知',
-    'global cohesion ×',
+    'global fallback ×（全局）',
     'live',
     { min: 0, max: 2, step: 0.01 }
   ),
@@ -1199,11 +1211,17 @@ function schoolEntries(config) {
         max: 5,
         step: 0.01,
       }),
-      entry(`${p}.targetNeighbors`, group, 'target neighbors', 'reset', {
-        min: 1,
-        max: 64,
-        step: 1,
-      }),
+      entry(
+        `${p}.targetNeighbors`,
+        group,
+        'target neighbors（当前鱼群）',
+        'reset',
+        {
+          min: 1,
+          max: 64,
+          step: 1,
+        }
+      ),
       entry(`${p}.cruiseSpeed`, group, 'cruise speed', 'live', {
         min: 0.01,
         max: 2,
@@ -1224,17 +1242,17 @@ function schoolEntries(config) {
         max: 4,
         step: 0.01,
       }),
-      entry(`${p}.separationWeight`, group, 'separation weight', 'live', {
+      entry(`${p}.separationWeight`, group, 'weight（当前鱼群）', 'live', {
         min: 0,
         max: 6,
         step: 0.05,
       }),
-      entry(`${p}.alignmentWeight`, group, 'alignment weight', 'live', {
+      entry(`${p}.alignmentWeight`, group, 'weight（当前鱼群）', 'live', {
         min: 0,
         max: 6,
         step: 0.05,
       }),
-      entry(`${p}.cohesionWeight`, group, 'cohesion weight', 'live', {
+      entry(`${p}.cohesionWeight`, group, 'weight（当前鱼群）', 'live', {
         min: 0,
         max: 6,
         step: 0.05,
