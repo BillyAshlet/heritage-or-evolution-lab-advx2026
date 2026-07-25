@@ -19,8 +19,33 @@ import { ExperimentCameraController } from './experiment-camera.js';
 import { createExperimentDebug } from './experiment-debug.js';
 import { TimeShortcutController } from './time-shortcuts.js';
 import { RadiusVisualizer } from './radius-visualizer.js';
+import {
+  GAME_PHASE,
+  GameAttemptSeed,
+  GameSession,
+  LEVEL_SPECS,
+  PLAYER_SCHOOL_ID,
+  createGameLevelConfig,
+} from './game-mode.js';
+import { GameUI } from './game-ui.js';
 
 const startup = document.getElementById('startup-status');
+const app = document.getElementById('app');
+
+const GAME_LEVEL_COPY = Object.freeze({
+  L1: Object.freeze({
+    era: 'GENERATION 01 · SCARCITY',
+    objective: '在捕食者与饥荒夹击下，让至少 35% 的蓝鱼活到观察结束。',
+  }),
+  L2: Object.freeze({
+    era: 'GENERATION 02 · GOLDEN AGE',
+    objective: '改变体型关系、利用平行鱼群，让至少 75% 的蓝鱼存活。',
+  }),
+  L3: Object.freeze({
+    era: 'GENERATION 03 · QUIET AFTERMATH',
+    objective: '在低食物、低活动的漫长时期，让至少 50% 的蓝鱼熬到最后。',
+  }),
+});
 
 function setStartup(message, state = 'loading') {
   startup.textContent = message;
@@ -74,7 +99,7 @@ function applyProjectPreset(stage) {
     stage.runtime.mode = 'steady';
     stage.traits.enabled = false;
     stage.ecology.enabled = true;
-    stage.plankton.enabled = false;
+    stage.plankton.enabled = true;
     restoreDefaultSchoolLayout(stage);
   } else if (stage.runtime.project === 'obstacle') {
     Object.assign(stage.tank, { width: 2, height: 1.2, depth: 0.8 });
@@ -110,7 +135,7 @@ function applyProjectPreset(stage) {
     stage.runtime.mode = 'ecology';
     stage.traits.enabled = true;
     stage.ecology.enabled = true;
-    stage.plankton.enabled = false;
+    stage.plankton.enabled = true;
     restoreDefaultSchoolLayout(stage);
   }
 }
@@ -132,9 +157,13 @@ async function bootstrap() {
   const world = new World();
   const input = new MotionInput(world);
   const initialConfig = createDefaultConfig();
+  const gameBaseConfig = createDefaultConfig();
+  const gameSession = new GameSession();
+  const gameAttemptSeed = new GameAttemptSeed();
+  let nonGameConfig = deepClone(initialConfig);
   syncTank(initialConfig);
   const presentation = createScene(
-    document.getElementById('app'),
+    app,
     () => input.presentationRotation()
   );
   const { renderer, scene, camera } = presentation;
@@ -165,6 +194,142 @@ async function bootstrap() {
     simulation,
   });
   let debug = null;
+  let gameUI = null;
+  let timeShortcuts = null;
+  let lastPresentedProject = null;
+  let lastGameUiUpdate = -Infinity;
+
+  function makeGameConfig({
+    running = false,
+    newAttempt = false,
+  } = {}) {
+    const config = createGameLevelConfig(
+      gameBaseConfig,
+      gameSession.currentLevel,
+      gameSession.previewCumulative
+    );
+    config.runtime.timeScale = running ? 1 : 0;
+    // Randomize once per playable attempt, then reuse that seed from TUNING
+    // into RUNNING so pressing Start does not reshuffle the visible scene.
+    config.runtime.randomizeSeed = false;
+    config.runtime.seed = newAttempt
+      ? gameAttemptSeed.renew()
+      : gameAttemptSeed.ensure();
+    return config;
+  }
+
+  function prepareProjectStage(project) {
+    if (project === 'game') {
+      const enteringGame = current.runtime.project !== 'game';
+      if (enteringGame) {
+        nonGameConfig = deepClone(current);
+      }
+      stage = makeGameConfig({ newAttempt: enteringGame });
+      return;
+    }
+
+    if (current.runtime.project === 'game') {
+      stage = deepClone(nonGameConfig);
+      stage.runtime.project = project;
+    }
+    applyProjectPreset(stage);
+  }
+
+  function gameRoundReport(metrics) {
+    const player = metrics.population.find(
+      (school) => school.id === PLAYER_SCHOOL_ID
+    );
+    if (!player) throw new Error(`找不到玩家鱼群 ${PLAYER_SCHOOL_ID}`);
+    const initial = player.target;
+    const survivors = player.alive;
+    const totalDeaths = Math.max(0, initial - survivors);
+    const eaten = Math.min(
+      totalDeaths,
+      Math.max(0, player.deaths?.captured ?? 0)
+    );
+    const measuredStarved = Math.max(0, player.deaths?.starved ?? 0);
+    const starved =
+      eaten + measuredStarved === totalDeaths
+        ? measuredStarved
+        : totalDeaths - eaten;
+    return {
+      initial,
+      survivors,
+      deaths: { eaten, starved },
+      events: [],
+    };
+  }
+
+  function gameViewModel(metrics = simulation.metrics()) {
+    const level = gameSession.currentLevel ?? LEVEL_SPECS.at(-1);
+    const copy = GAME_LEVEL_COPY[level.id] ?? {};
+    const player = metrics.population.find(
+      (school) => school.id === PLAYER_SCHOOL_ID
+    );
+    const report = gameSession.report;
+    const initial = report?.initial ?? player?.target ?? level.playerFish.count;
+    const survivors =
+      report?.survivors ?? player?.alive ?? level.playerFish.count;
+    const rawTimeRemaining = level.durationSec - metrics.elapsed;
+    return {
+      active: current.runtime.project === 'game',
+      phase: gameSession.phase,
+      levelIndex: gameSession.levelIndex,
+      levelCount: LEVEL_SPECS.length,
+      level: {
+        ...level,
+        title: level.label,
+        era: copy.era,
+        objective: copy.objective,
+      },
+      barycentric: gameSession.barycentric,
+      roundWeights: gameSession.barycentric,
+      roundMultipliers: gameSession.roundMultipliers,
+      inheritedCoefficients: gameSession.inheritedCoefficients,
+      previewCumulative: gameSession.previewCumulative,
+      cumulativeCoefficients: gameSession.previewCumulative,
+      initial,
+      survivors,
+      survivalPct: initial > 0 ? (survivors / initial) * 100 : 0,
+      timeRemaining:
+        rawTimeRemaining <= 1e-6 ? 0 : Math.max(0, rawTimeRemaining),
+      deaths: report?.deaths ?? player?.deaths,
+      lineage: gameSession.lineage,
+      result: gameSession.verdict,
+    };
+  }
+
+  function renderGameUi(nowMs = performance.now(), force = false) {
+    if (!gameUI) return;
+    if (current.runtime.project !== 'game') {
+      gameUI.render({ active: false });
+      return;
+    }
+    if (!force && nowMs - lastGameUiUpdate < 100) return;
+    lastGameUiUpdate = nowMs;
+    gameUI.render(gameViewModel());
+  }
+
+  function syncProjectPresentation(force = false) {
+    const project = current.runtime.project;
+    const isGame = project === 'game';
+    app.dataset.project = project;
+    if (isGame) {
+      app.dataset.gameAttemptSeed = String(current.runtime.seed);
+    } else {
+      delete app.dataset.gameAttemptSeed;
+    }
+    timeShortcuts?.setEnabled(!isGame);
+    cameraController.setInteractionEnabled(!isGame);
+    simulation.setLocomotionPreview(
+      isGame && gameSession.phase === GAME_PHASE.TUNING
+    );
+    if (project !== lastPresentedProject && isGame) {
+      cameraController.exitView(true);
+    }
+    lastPresentedProject = project;
+    renderGameUi(performance.now(), force || isGame);
+  }
 
   const controller = {
     get current() {
@@ -180,8 +345,23 @@ async function bootstrap() {
       return result;
     },
     applyConfig(mode = 'rebuildScene', sourcePath = '') {
-      if (sourcePath === 'runtime.project') applyProjectPreset(stage);
-      if (sourcePath === 'tank.preset') applyTankPreset(stage);
+      if (sourcePath === 'runtime.project') {
+        prepareProjectStage(stage.runtime.project);
+      }
+      if (sourcePath === 'tank.preset') {
+        if (stage.tank.preset === 'game') {
+          stage.runtime.project = 'game';
+          prepareProjectStage('game');
+        } else {
+          applyTankPreset(stage);
+        }
+      }
+      if (!sourcePath && stage.runtime.project === 'game') {
+        // Imports and programmatic staging can name Game without going through
+        // the project switcher. Rebuild the canonical current level so the
+        // simulation and GameSession can never diverge.
+        prepareProjectStage('game');
+      }
       if (sourcePath === 'runtime.populationPreset') {
         applyPopulationPreset(stage);
       } else if (/^schools\.\d+\.count$/.test(sourcePath)) {
@@ -218,6 +398,7 @@ async function bootstrap() {
       if (result.warnings.length) {
         console.warn('[experiment config]', ...result.warnings);
       }
+      syncProjectPresentation();
       return { config: current, warnings: result.warnings };
     },
     reset() {
@@ -280,7 +461,7 @@ async function bootstrap() {
       physics.spawnRigidBody(type, options),
   });
   const radiusVisualizer = new RadiusVisualizer(scene);
-  const timeShortcuts = new TimeShortcutController({
+  timeShortcuts = new TimeShortcutController({
     setTimeScale(value) {
       stage.runtime.timeScale = value;
       controller.applyConfig('live', 'runtime.timeScale');
@@ -291,6 +472,82 @@ async function bootstrap() {
       cameraController.exitView(true);
     },
   });
+
+  function installGameScene({
+    running = false,
+    newAttempt = true,
+  } = {}) {
+    controller.setStage(
+      makeGameConfig({ running, newAttempt })
+    );
+    const result = controller.applyConfig(
+      'rebuildScene',
+      running ? 'game.start' : 'game.tuning'
+    );
+    renderGameUi(performance.now(), true);
+    return result;
+  }
+
+  function updateTriangleSelection(point) {
+    gameSession.setBarycentric(point?.barycentric ?? point);
+    controller.setStage(makeGameConfig());
+    controller.applyConfig('live', 'game.tuning.selection');
+    renderGameUi(performance.now(), true);
+  }
+
+  gameUI = new GameUI({
+    root: document.getElementById('game-ui-root'),
+    onTriangleInput: updateTriangleSelection,
+    onBarycentricInput: updateTriangleSelection,
+    onStart() {
+      if (gameSession.phase !== GAME_PHASE.TUNING) return;
+      // Validate and stage the exact attempt before locking the selection.
+      controller.setStage(makeGameConfig({ running: true }));
+      gameSession.startLevel();
+      // TUNING already holds a clean, non-scoring simulation. Applying the
+      // final phenotype live preserves the visible positions instead of
+      // rewinding the fish to their spawn points.
+      controller.applyConfig('live', 'game.start');
+      simulation.beginGameplayFromPreview();
+      // Do not charge the RUNNING state for the partial RAF interval that
+      // elapsed while the player was still choosing a direction.
+      world.resetTiming(performance.now());
+      renderGameUi(performance.now(), true);
+    },
+    onRetry() {
+      if (gameSession.phase !== GAME_PHASE.VERDICT) return;
+      gameSession.retryLevel();
+      installGameScene();
+    },
+    onContinue() {
+      if (gameSession.phase === GAME_PHASE.VERDICT) {
+        if (!gameSession.verdict?.won) return;
+        gameSession.sealGeneration();
+        renderGameUi(performance.now(), true);
+        return;
+      }
+      if (gameSession.phase !== GAME_PHASE.INHERIT) return;
+      gameSession.advanceLevel();
+      if (gameSession.phase === GAME_PHASE.COMPLETE) {
+        renderGameUi(performance.now(), true);
+      } else {
+        installGameScene();
+      }
+    },
+    onRestart() {
+      gameSession.restart();
+      installGameScene();
+    },
+    onExit() {
+      // Exiting during RUNNING would discard the attempt's only live report.
+      if (gameSession.phase === GAME_PHASE.RUNNING) return;
+      stage.runtime.project = 'aquarium';
+      controller.applyConfig('rebuildScene', 'runtime.project');
+      debug.rebuildPane();
+      renderGameUi(performance.now(), true);
+    },
+  });
+  syncProjectPresentation(true);
 
   const experimentApi = {
     stageConfig(next) {
@@ -332,6 +589,27 @@ async function bootstrap() {
   });
   window.experiment = experimentApi;
 
+  function finishGameLevelIfNeeded(metrics) {
+    if (
+      current.runtime.project !== 'game' ||
+      gameSession.phase !== GAME_PHASE.RUNNING
+    ) {
+      return false;
+    }
+    const player = metrics.population.find(
+      (school) => school.id === PLAYER_SCHOOL_ID
+    );
+    const timedOut =
+      metrics.elapsed + 1e-9 >= gameSession.currentLevel.durationSec;
+    if (!timedOut && (player?.alive ?? 0) > 0) return false;
+
+    stage.runtime.timeScale = 0;
+    controller.applyConfig('live', 'runtime.timeScale');
+    gameSession.finishLevel(gameRoundReport(metrics));
+    renderGameUi(performance.now(), true);
+    return true;
+  }
+
   let lastFrame = performance.now();
   let smoothedFrameMs = 16.7;
   renderer.setAnimationLoop((nowMs) => {
@@ -342,9 +620,17 @@ async function bootstrap() {
     input.update();
     presentation.updateOrientation();
     presentation.updateCamera();
-    world.timeScale = current.runtime.timeScale;
+    const tuningPreview =
+      current.runtime.project === 'game' &&
+      gameSession.phase === GAME_PHASE.TUNING;
+    world.timeScale = tuningPreview ? 1 : current.runtime.timeScale;
     world.fixedDt = current.runtime.fixedDt;
     world.step(nowMs);
+    if (current.runtime.project === 'game') {
+      const metrics = simulation.metrics();
+      finishGameLevelIfNeeded(metrics);
+      renderGameUi(nowMs);
+    }
     cameraController.update(realDt);
     renderer.render(scene, camera);
     cameraController.renderPreview();

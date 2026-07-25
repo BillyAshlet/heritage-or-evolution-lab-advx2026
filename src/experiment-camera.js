@@ -25,6 +25,7 @@ export class ExperimentCameraController {
     this.simulation = simulation;
     this.selected = -1;
     this.mode = CAMERA_MODE.GLOBAL;
+    this.interactionEnabled = true;
     this.dragPointer = null;
     this.dragStart = null;
     this.savedPose = null;
@@ -106,7 +107,13 @@ export class ExperimentCameraController {
   _bindEvents() {
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0 || this.mode !== CAMERA_MODE.GLOBAL) return;
+      if (
+        !this.interactionEnabled ||
+        event.button !== 0 ||
+        this.mode !== CAMERA_MODE.GLOBAL
+      ) {
+        return;
+      }
       this.dragPointer = event.pointerId;
       this.dragStart = {
         x: event.clientX,
@@ -187,6 +194,7 @@ export class ExperimentCameraController {
   }
 
   select(index) {
+    if (!this.interactionEnabled) return false;
     const fish = this.simulation.fish(index);
     if (!fish?.alive) return false;
     this.selected = index;
@@ -206,6 +214,15 @@ export class ExperimentCameraController {
     this.inspector.hidden = true;
     this.viewHud.hidden = true;
     this.presentation.cameraSettings.orbitEnabled = true;
+  }
+
+  setInteractionEnabled(enabled) {
+    const next = Boolean(enabled);
+    if (next === this.interactionEnabled) return;
+    this.interactionEnabled = next;
+    this.dragPointer = null;
+    this.dragStart = null;
+    if (!next) this.exitView(true);
   }
 
   _refreshLabels(fish) {

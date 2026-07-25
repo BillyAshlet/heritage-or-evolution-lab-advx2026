@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createDefaultConfig } from './experiment-config.js';
+import {
+  captureSpeedFactor,
+  effectiveSchoolCaptureRate,
+  perPredatorCooldown,
+} from './experiment-model.js';
 import { ExperimentSimulation } from './experiment-simulation.js';
 
 function smallSimulation(mode = 'steady', seed = 1001, withScene = false) {
@@ -40,6 +45,113 @@ test('headless simulation does not require a THREE.Scene adapter', () => {
   assert.ok(school.alignmentRadius < school.cohesionRadius);
   simulation._advance(1 / 60);
   assert.ok(simulation.elapsed > 0);
+});
+
+test('locomotion preview moves fish without advancing gameplay state', () => {
+  const simulation = smallSimulation('steady', 7342);
+  const prey = 0;
+  const predator = simulation.schoolRanges[1].start;
+  simulation.positions[prey * 3] = 0;
+  simulation.positions[prey * 3 + 1] = 0;
+  simulation.positions[prey * 3 + 2] = 0;
+  simulation.positions[predator * 3] = 0.001;
+  simulation.positions[predator * 3 + 1] = 0;
+  simulation.positions[predator * 3 + 2] = 0;
+  simulation.energy[prey] = 0.0001;
+  simulation.cooldowns[predator] = 0;
+
+  const before = {
+    positions: Array.from(simulation.positions),
+    energy: Array.from(simulation.energy),
+    alive: Array.from(simulation.alive),
+    cooldowns: Array.from(simulation.cooldowns),
+    deaths: structuredClone(simulation.deathCounts),
+    planktonLevel: simulation.planktonLevel,
+    planktonConsumed: simulation.planktonConsumed,
+    captures: simulation.metricsState.captures,
+  };
+
+  simulation.setLocomotionPreview(true);
+  for (let frame = 0; frame < 120; frame += 1) {
+    simulation.step(1 / 60);
+  }
+
+  assert.ok(
+    simulation.positions.some(
+      (value, index) => Math.abs(value - before.positions[index]) > 1e-6
+    )
+  );
+  assert.equal(simulation.elapsed, 0);
+  assert.deepEqual(Array.from(simulation.energy), before.energy);
+  assert.deepEqual(Array.from(simulation.alive), before.alive);
+  assert.deepEqual(Array.from(simulation.cooldowns), before.cooldowns);
+  assert.deepEqual(simulation.deathCounts, before.deaths);
+  assert.equal(simulation.planktonLevel, before.planktonLevel);
+  assert.equal(simulation.planktonConsumed, before.planktonConsumed);
+  assert.equal(simulation.metricsState.captures, before.captures);
+  assert.ok(simulation.panic.every((value) => value === 0));
+  assert.ok(simulation.alarm.every((value) => value === 0));
+  assert.ok(simulation.pursuitTargets.every((value) => value === -1));
+  assert.ok(simulation.locomotionStates.every((value) => value === 0));
+
+  const visiblePositions = Array.from(simulation.positions);
+  const visibleVelocities = Array.from(simulation.velocities);
+  simulation.beginGameplayFromPreview();
+  assert.equal(simulation.locomotionPreview, false);
+  assert.deepEqual(Array.from(simulation.positions), visiblePositions);
+  assert.deepEqual(Array.from(simulation.velocities), visibleVelocities);
+  assert.equal(simulation.elapsed, 0);
+  simulation.step(1 / 60);
+  assert.ok(simulation.elapsed > 0);
+});
+
+test('gameplay start canonicalizes relation hysteresis and final cooldowns', () => {
+  const simulation = smallSimulation('steady', 9917);
+  const actorSchoolIndex = 1;
+  const targetSchoolIndex = 0;
+  const actorRange = simulation.schoolRanges[actorSchoolIndex];
+  const actorIndex = actorRange.start;
+  const peerConfig = structuredClone(simulation.config);
+  const target = peerConfig.schools[targetSchoolIndex];
+  const actor = peerConfig.schools[actorSchoolIndex];
+  actor.size =
+    target.size *
+    (peerConfig.relations.k - peerConfig.relations.hysteresis / 2);
+
+  // The prior pursuit relation keeps the live preview inside hysteresis.
+  simulation.setConfig(peerConfig, 'live');
+  assert.equal(
+    simulation.relationMatrix[actorSchoolIndex][targetSchoolIndex],
+    'pursuit'
+  );
+  simulation.beginGameplayFromPreview();
+  assert.equal(
+    simulation.relationMatrix[actorSchoolIndex][targetSchoolIndex],
+    'peer'
+  );
+  assert.equal(simulation.cooldowns[actorIndex], Infinity);
+
+  const pursuitConfig = structuredClone(peerConfig);
+  const pursuitActor = pursuitConfig.schools[actorSchoolIndex];
+  pursuitActor.size =
+    target.size * (pursuitConfig.relations.k + 0.05);
+  pursuitActor.cruiseSpeed *= 1.4;
+  pursuitActor.maxSpeed *= 1.4;
+  simulation.setConfig(pursuitConfig, 'live');
+  simulation.beginGameplayFromPreview();
+
+  const period = perPredatorCooldown(
+    actorRange.end - actorRange.start,
+    effectiveSchoolCaptureRate(pursuitConfig, pursuitActor),
+    captureSpeedFactor(pursuitConfig, pursuitActor)
+  );
+  assert.ok(Number.isFinite(simulation.cooldowns[actorIndex]));
+  assert.ok(
+    Math.abs(
+      simulation.cooldowns[actorIndex] -
+        simulation.initialCooldownPhases[actorIndex] * period
+    ) < 1e-5
+  );
 });
 
 test('configuration and runtime expose no replenishment mechanism', () => {
@@ -191,6 +303,50 @@ test('predation mode captures at visual distance and death stays permanent', () 
   simulation.elapsed += 30;
   simulation._capture(30);
   assert.equal(simulation.alive[prey], 0);
+});
+
+test('initial, post-capture and metrics cooldowns share school speed and capture multipliers', () => {
+  const simulation = smallSimulation('steady', 1001);
+  const mediumSchoolIndex = 1;
+  const medium = simulation.config.schools[mediumSchoolIndex];
+  const range = simulation.schoolRanges[mediumSchoolIndex];
+  const initialCooldowns = Array.from(
+    simulation.cooldowns.slice(range.start, range.end)
+  );
+
+  medium.cruiseSpeed =
+    simulation.config.capture.referenceCruiseSpeed * 2;
+  medium.captureRateMultiplier = 2;
+  simulation.reset(1001);
+  const scaledInitialCooldowns = Array.from(
+    simulation.cooldowns.slice(range.start, range.end)
+  );
+  for (let index = 0; index < initialCooldowns.length; index += 1) {
+    assert.ok(
+      Math.abs(
+        scaledInitialCooldowns[index] - initialCooldowns[index] / 4
+      ) < 1e-6
+    );
+  }
+
+  const prey = 0;
+  const predator = range.start;
+  simulation.positions.fill(0);
+  simulation.pursuitTargets[predator] = prey;
+  simulation.cooldowns[predator] = 0;
+  simulation._capture(1 / 60);
+  const expected = perPredatorCooldown(
+    simulation._activeSchoolCount(mediumSchoolIndex),
+    effectiveSchoolCaptureRate(simulation.config, medium),
+    captureSpeedFactor(simulation.config, medium)
+  );
+  assert.ok(Math.abs(simulation.cooldowns[predator] - expected) < 1e-6);
+  const pair = simulation
+    .metrics()
+    .predatorPairs.find(
+      (item) => item.actor === 'medium' && item.target === 'small'
+    );
+  assert.ok(Math.abs(pair.perPredatorCooldown - expected) < 1e-12);
 });
 
 test('seeded initial simulation state is reproducible', () => {
@@ -354,4 +510,65 @@ test('carrion foraging restores energy from starvation debris', () => {
   for (let i = 0; i < 20; i += 1) simulation._updateEcology(0.25);
   assert.ok(simulation.energy[0] > before);
   assert.ok(simulation.metrics().ecology.plankton.consumed > 0);
+});
+
+test('feeding recovery is amplified and shares 40 percent with living schoolmates', () => {
+  const simulation = smallSimulation('steady', 20260725);
+  const schoolRange = simulation.schoolRanges[0];
+  const eater = schoolRange.start;
+  const peer = eater + 1;
+  simulation.config.ecology.forageEnergyMultiplier = 2.2;
+  simulation.config.ecology.energyShareFraction = 0.4;
+  simulation.config.ecology.planktonEnergy = 0.06;
+  simulation.config.plankton.energyConversion = 1;
+  simulation.config.plankton.halfSaturationFraction = 0;
+  simulation.config.ecology.grazeHungerRatio = 0.2;
+  simulation.config.ecology.basalRate = 0;
+  simulation.config.ecology.burstMetabolicRate = 0;
+  simulation.config.schools[0].grazeRate = 1;
+  simulation.energy.fill(1);
+  simulation.energy[eater] = 0.1;
+  simulation.energy[peer] = 0.3;
+  simulation.rng.next = () => 0;
+
+  simulation._updateEcology(0.25);
+
+  const gain = 0.06 * 2.2;
+  const sharedPerFish =
+    (gain * 0.4) / (schoolRange.end - schoolRange.start);
+  assert.ok(
+    Math.abs(
+      simulation.energy[eater] -
+        (0.1 + gain * 0.6 + sharedPerFish)
+    ) < 1e-6
+  );
+  assert.ok(
+    Math.abs(simulation.energy[peer] - (0.3 + sharedPerFish)) < 1e-6
+  );
+});
+
+test('plankton seed stock cannot become frame-rate-dependent free food', () => {
+  const simulation = smallSimulation('steady', 20260726);
+  const eater = simulation.schoolRanges[0].start;
+  simulation.config.ecology.basalRate = 0;
+  simulation.config.ecology.burstMetabolicRate = 0;
+  simulation.config.ecology.grazeHungerRatio = 0.2;
+  simulation.config.plankton.growthRate = 0;
+  simulation.config.schools[0].grazeRate = 1;
+  simulation.energy.fill(1);
+  simulation.energy[eater] = 0.1;
+  simulation.rng.next = () => 0;
+  const floor =
+    simulation.config.plankton.capacity *
+    simulation.config.plankton.minFraction;
+  simulation.planktonLevel = floor;
+  const consumedBefore = simulation.planktonConsumed;
+
+  for (let frame = 0; frame < 120; frame += 1) {
+    simulation._updateEcology(1 / 60);
+  }
+
+  assert.ok(Math.abs(simulation.energy[eater] - 0.1) < 1e-7);
+  assert.equal(simulation.planktonLevel, floor);
+  assert.equal(simulation.planktonConsumed, consumedBefore);
 });

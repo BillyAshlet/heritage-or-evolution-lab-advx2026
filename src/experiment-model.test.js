@@ -4,12 +4,15 @@ import {
   SeededRng,
   SpatialHash3D,
   captureRadius,
+  captureSpeedFactor,
   deriveExperiment,
   ecologyOutcome,
+  effectiveSchoolCaptureRate,
   effectiveMaxSpeed,
   effectiveTurnSpeed,
   metabolicRate,
   perPredatorCooldown,
+  planktonIntake,
   relationBetween,
   relationForRatio,
   stepPlankton,
@@ -127,6 +130,32 @@ test('per-predator independent cooldown converges to target school rate', () => 
   assert.ok(Math.abs(count / cooldown - targetRate) < 1e-12);
 });
 
+test('school capture rate combines its explicit multiplier with normalized speed', () => {
+  const config = createDefaultConfig();
+  const school = config.schools[1];
+  assert.equal(captureSpeedFactor(config, school), 1);
+  assert.equal(
+    effectiveSchoolCaptureRate(config, school),
+    config.capture.targetCaptureRate
+  );
+
+  school.cruiseSpeed = config.capture.referenceCruiseSpeed * 1.4;
+  school.captureRateMultiplier = 0.5;
+  const effectiveRate = effectiveSchoolCaptureRate(config, school);
+  const cooldown = perPredatorCooldown(
+    school.count,
+    effectiveRate,
+    captureSpeedFactor(config, school)
+  );
+  assert.ok(Math.abs(captureSpeedFactor(config, school) - 1.4) < 1e-12);
+  assert.ok(
+    Math.abs(
+      school.count / cooldown -
+        config.capture.targetCaptureRate * 0.5 * 1.4
+    ) < 1e-12
+  );
+});
+
 test('seeded RNG is reproducible without importing the rendering engine', () => {
   const rngA = new SeededRng(44);
   const rngB = new SeededRng(44);
@@ -161,6 +190,46 @@ test('ecology helpers implement logistic food, Kleiber-like drain and terminal o
   assert.equal(ecologyOutcome([3, 2, 0]).state, 'running');
 });
 
+test('plankton half saturation reduces intake only when stock is scarce', () => {
+  assert.equal(
+    planktonIntake({
+      available: 10,
+      maxIntake: 2,
+      halfSaturation: 0,
+    }),
+    2
+  );
+  assert.equal(
+    planktonIntake({
+      available: 10,
+      maxIntake: 2,
+      halfSaturation: 10,
+    }),
+    1
+  );
+  const scarce = planktonIntake({
+    available: 0.25,
+    maxIntake: 2,
+    halfSaturation: 10,
+  });
+  assert.ok(scarce > 0);
+  assert.ok(scarce < 0.25);
+});
+
+test('school metabolism multiplier scales basal and burst drain together', () => {
+  const config = createDefaultConfig();
+  const school = config.schools[1];
+  const basal = metabolicRate(config, school);
+  const burst = metabolicRate(config, school, true);
+  school.metabolismMultiplier = 1.75;
+  assert.ok(
+    Math.abs(metabolicRate(config, school) - basal * 1.75) < 1e-12
+  );
+  assert.ok(
+    Math.abs(metabolicRate(config, school, true) - burst * 1.75) <
+      1e-12
+  );
+});
 test('trait coupling penalizes sustained speed and turning while preserving burst state', () => {
   const config = createDefaultConfig();
   config.traits.enabled = true;

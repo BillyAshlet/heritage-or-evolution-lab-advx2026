@@ -27,6 +27,8 @@ function school({
     cruiseSpeed: 0.23,
     maxSpeed: 0.46,
     turnSpeed: 2.8,
+    captureRateMultiplier: 1,
+    metabolismMultiplier: 1,
     // 觅食效率：同时决定进食【转化率】和【尝试频率】。
     // 小鱼靠浮游为生；中鱼 1/4；大鱼 0.01 ≈ 几乎不主动吃浮游。
     // "优先吃鱼"由代码保证：锁定猎物时不觅食（见 _updateEcology）。
@@ -250,9 +252,8 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     // 约 1.5 像素 —— 那就是"看不见任何浮游生物"的原因。
     // 0.03 = 4.5 像素，且正好等于鱼体长（bodyLength 0.03），符合"和尸体差不多大"。
     pointSize: 0.03,
-    // 浅色半透明：缸体/背景深蓝 #071e3d、鱼是蓝/橙/红、浮尸灰 #6b6f74，
-    // 淡薄荷白与这四者都能区分。
-    color: '#dcf1e6',
+    // 深绿让浮游资源在深蓝水体中保持自然的藻类观感，并与蓝/橙/红鱼群区分。
+    color: '#14532d',
     opacity: 0.75,
     // 存量下限：logistic 在 0 处 growth=0，吃光就永不恢复
     minFraction: 0.01,
@@ -271,6 +272,8 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     // 3/秒会让玩家的中群在 67 秒内被吃光（关卡 120 秒）。
     // 0.8/秒 → 120 秒损失约 48%，留得住抉择空间。
     targetCaptureRate: 0.8,
+    // 鱼群 cruiseSpeed 相对该基准的倍率统一作用于捕获冷却。
+    referenceCruiseSpeed: 0.23,
     captureLengthFactor: 0.5,
   },
   debug: {
@@ -300,7 +303,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     feedSpeed: 0.12,
     feedSize: 0.009,
     feedLifetime: 0.32,
-    feedColor: '#dcf1e6',
+    feedColor: '#14532d',
     maxParticles: 600,
   },
   starvationVfx: {
@@ -440,6 +443,7 @@ function entry(path, group, label, applyMode, options = {}) {
 const scalarEntries = [
   entry('runtime.project', '项目', 'project', 'rebuildScene', {
     options: {
+      '游戏 · 三代进化': 'game',
       '主项目 · 水族馆': 'aquarium',
       '子实验 · 地图与刚体': 'obstacle',
       '子实验 · 生态淘汰': 'ecology',
@@ -453,16 +457,16 @@ const scalarEntries = [
   }),
   entry(
     'runtime.populationPreset',
-    '运行',
-    'population preset',
-    'rebuildScene',
-    {
-      options: {
-        '完整 640': 'full',
-        '性能 300': 'performance',
-        '自定义': 'custom',
-      },
-    }
+      '运行',
+      'population preset',
+      'rebuildScene',
+      {
+        options: {
+          '完整 680': 'full',
+          '性能 320': 'performance',
+          '自定义': 'custom',
+        },
+      }
   ),
   entry('runtime.randomizeSeed', '运行', '每局随机种子', 'live'),
   entry('runtime.seed', '运行', 'seed', 'reset', {
@@ -500,6 +504,7 @@ const scalarEntries = [
   }),
   entry('tank.preset', '缸体', 'preset', 'rebuildScene', {
     options: {
+      Game: 'game',
       Aquarium: 'aquarium',
       Obstacle: 'obstacle',
       Ecology: 'ecology',
@@ -1073,6 +1078,13 @@ const scalarEntries = [
     step: 0.05,
   }),
   entry(
+    'capture.referenceCruiseSpeed',
+    '捕食',
+    'reference cruise speed',
+    'live',
+    { min: 0.01, max: 2, step: 0.01 }
+  ),
+  entry(
     'capture.captureLengthFactor',
     '捕食',
     'capture length ×',
@@ -1389,6 +1401,8 @@ function schoolEntries(config) {
   return config.schools.flatMap((item, index) => {
     const p = `schools.${index}`;
     const group = `鱼群 · ${item.name}`;
+    const gamePlayer =
+      config.runtime?.project === 'game' && item.id === 'medium';
     return [
       entry(`${p}.id`, group, 'id', 'rebuildScene'),
       entry(`${p}.name`, group, 'name', 'rebuildScene'),
@@ -1399,8 +1413,11 @@ function schoolEntries(config) {
         step: 1,
       }),
       entry(`${p}.size`, group, 'size', 'live', {
-        min: 0.2,
-        max: 5,
+        // Game 的三代乘法遗传不做 silent clamp：三次顶点选择的合法
+        // 极值是 1.5 × 0.5³ = 0.1875 与 1.5 × 1.5³ = 5.0625。
+        // 只为蓝色玩家鱼放宽；实验调试项目继续使用原安全范围。
+        min: gamePlayer ? 0.18 : 0.2,
+        max: gamePlayer ? 5.1 : 5,
         step: 0.01,
       }),
       entry(`${p}.podCount`, group, '小群数量', 'reset', {
@@ -1433,6 +1450,18 @@ function schoolEntries(config) {
         min: 0.1,
         max: 12,
         step: 0.1,
+      }),
+      entry(`${p}.captureRateMultiplier`, group, 'capture rate ×', 'live', {
+        min: 0,
+        max: 5,
+        step: 0.01,
+      }),
+      entry(`${p}.metabolismMultiplier`, group, 'metabolism ×', 'live', {
+        // 体型、速度和耐力累计后的三代顶点包络约为
+        // 0.0143–23.7874。范围只负责合法承载，不改变或钳制领域值。
+        min: gamePlayer ? 0.005 : 0.1,
+        max: gamePlayer ? 25 : 5,
+        step: 0.01,
       }),
       entry(`${p}.grazeRate`, group, '尸体觅食 ×', 'live', {
         min: 0,

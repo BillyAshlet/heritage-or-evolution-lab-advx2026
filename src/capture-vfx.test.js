@@ -33,3 +33,18 @@ test('starvation corpses are brown, persistent and edible', () => {
   vfx.step(10);
   assert.equal(vfx.starvationCount(), 3);
 });
+
+test('feed particles fall back to the plankton dark green', () => {
+  const scene = new THREE.Scene();
+  const vfx = new CaptureVfx(scene, {
+    enabled: true,
+    density: 0,
+    particleCount: 0,
+    feedEnabled: true,
+    feedParticles: 3,
+  });
+  vfx.emitFeed(0, 0, 0);
+  assert.equal(vfx.particles.length, 3);
+  assert.ok(vfx.particles.every((particle) => particle.color === '#14532d'));
+  vfx.dispose();
+});

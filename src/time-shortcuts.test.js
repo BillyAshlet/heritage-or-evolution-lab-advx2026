@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   HeldTimeShortcutState,
   SpaceDoubleTapDetector,
+  TimeShortcutController,
   isEditableShortcutTarget,
   resolveHeldTimeScale,
 } from './time-shortcuts.js';
@@ -51,4 +52,32 @@ test('time shortcuts ignore editable controls', () => {
   assert.equal(isEditableShortcutTarget({ tagName: 'INPUT' }), true);
   assert.equal(isEditableShortcutTarget({ tagName: 'BUTTON' }), true);
   assert.equal(isEditableShortcutTarget({ tagName: 'CANVAS' }), false);
+});
+
+test('disabled time shortcuts clear held state and ignore keyboard input', () => {
+  const controller = Object.create(TimeShortcutController.prototype);
+  controller.enabled = true;
+  controller.hud = {
+    hidden: false,
+  };
+  controller.state = new HeldTimeShortcutState();
+  controller.doubleSpace = new SpaceDoubleTapDetector();
+  const values = [];
+  controller._apply = (value) => values.push(value);
+  controller.state.press('Enter');
+  controller.setEnabled(false);
+  assert.equal(controller.enabled, false);
+  assert.equal(controller.hud.hidden, true);
+  assert.deepEqual(controller.state.keys, []);
+  controller._handleKeyDown({
+    code: 'Enter',
+    key: 'Enter',
+    repeat: false,
+    defaultPrevented: false,
+    target: { tagName: 'CANVAS' },
+    preventDefault() {},
+  });
+  assert.deepEqual(values, []);
+  controller.setEnabled(true);
+  assert.equal(controller.hud.hidden, false);
 });

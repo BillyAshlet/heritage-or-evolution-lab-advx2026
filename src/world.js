@@ -82,4 +82,9 @@ export class World {
       this._accumulator -= fixedDt;
     }
   }
+
+  resetTiming(nowMs = performance.now()) {
+    this._accumulator = 0;
+    this._lastMs = Number.isFinite(nowMs) ? nowMs : null;
+  }
 }

@@ -47,6 +47,12 @@ export function zoomRangeWindow(state, value, factor, limits) {
 }
 
 const PROJECTS = {
+  game: {
+    eyebrow: 'THREE-GENERATION GAME',
+    title: '进化游戏',
+    description: '每代只做一次选择；速度、体型与耐力会被真实生态检验。',
+    dashboard: 'GENERATION LEDGER',
+  },
   aquarium: {
     eyebrow: 'MAIN PROJECT',
     title: '主水族馆',
@@ -639,6 +645,10 @@ export function createExperimentDebug({
     holder.replaceChildren();
     addProjectSwitcher();
     const meta = projectMeta();
+    if (controller.stage.runtime.project === 'game') {
+      pane = null;
+      return;
+    }
     pane = new Pane({
       title: `${meta.eyebrow} · 参数`,
       container: holder,
@@ -687,6 +697,8 @@ export function createExperimentDebug({
     let stateText = 'running';
     if (metrics.project === 'aquarium') {
       stateText = 'LIVE · SIZE ROLES';
+    } else if (metrics.project === 'game') {
+      stateText = 'GAME · PLAYER LOCKED';
     } else if (metrics.project === 'obstacle') {
       stateText = 'LIVE · FIELD';
     } else if (metrics.project === 'ecology') {

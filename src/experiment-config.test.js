@@ -56,10 +56,12 @@ test('default project is the live size-derived aquarium', () => {
   // 浮游生物已重新启用（作为小鱼的主食），并加了存量下限防止吃光后
   // logistic 再生卡在 0。可持续性核算：总消耗 10.1/s vs 再生上限 18.0/s。
   assert.equal(config.plankton.enabled, true);
+  assert.equal(config.plankton.color, '#14532d');
+  assert.equal(config.captureVfx.feedColor, '#14532d');
   assert.ok(config.plankton.minFraction > 0);
   assert.ok(Math.abs(config.ecology.energyCapacity - 2 / 3) < 1e-12);
   assert.equal(config.ecology.minBurstEnergyRatio, 1 / 3);
-  assert.deepEqual(projectOptions, ['aquarium', 'obstacle', 'ecology']);
+  assert.deepEqual(projectOptions, ['game', 'aquarium', 'obstacle', 'ecology']);
   assert.deepEqual(modeOptions, ['steady', 'ecology']);
   assert.equal('policy' in config.relations, false);
   assert.equal('holding' in config, false);
@@ -85,6 +87,14 @@ test('default project is the live size-derived aquarium', () => {
   assert.equal(config.locomotion.maxForce, 5.2);
   assert.equal(config.perception.detectionLengthFactor, 0.511);
   assert.equal(config.captureVfx.enabled, true);
+  assert.equal(config.capture.referenceCruiseSpeed, 0.23);
+  assert.deepEqual(
+    config.schools.map((school) => [
+      school.captureRateMultiplier,
+      school.metabolismMultiplier,
+    ]),
+    config.schools.map(() => [1, 1])
+  );
 });
 
 test('removed cascade project fails closed during config import', () => {

@@ -7,6 +7,7 @@
     "dev": "vite --host",
     "dev:http": "NO_HTTPS=1 vite",
     "test": "node --test",
+    "test:balance": "node tools/game_balance_search.mjs --verify-reference --quiet",
     "build": "vite build",
     "preview": "vite preview --host"
   },

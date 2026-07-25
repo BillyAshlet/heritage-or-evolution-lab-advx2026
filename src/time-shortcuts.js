@@ -73,6 +73,7 @@ export class TimeShortcutController {
     this.onDoubleSpace = onDoubleSpace;
     this.state = new HeldTimeShortcutState();
     this.doubleSpace = new SpaceDoubleTapDetector(doubleSpaceMs);
+    this.enabled = true;
     this.hud = this._createHud();
     this.valueLabel = this.hud.querySelector('#time-shortcut-value');
     this.lastDisplayedValue = null;
@@ -106,6 +107,7 @@ export class TimeShortcutController {
 
   _handleKeyDown(event) {
     if (
+      !this.enabled ||
       event.repeat ||
       event.defaultPrevented ||
       isEditableShortcutTarget(event.target)
@@ -130,6 +132,7 @@ export class TimeShortcutController {
   }
 
   _handleKeyUp(event) {
+    if (!this.enabled) return;
     const code =
       event.code === 'Enter' || event.key === 'Enter'
         ? 'Enter'
@@ -146,6 +149,17 @@ export class TimeShortcutController {
     const scale = this.state.clear();
     this.doubleSpace.clear();
     if (scale !== null) this._apply(scale);
+  }
+
+  setEnabled(enabled) {
+    const next = Boolean(enabled);
+    if (next === this.enabled) return;
+    this.enabled = next;
+    this.hud.hidden = !next;
+    if (!next) {
+      this.state.clear();
+      this.doubleSpace.clear();
+    }
   }
 
   update(value) {

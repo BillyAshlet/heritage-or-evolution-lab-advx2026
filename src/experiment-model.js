@@ -134,6 +134,21 @@ export function perPredatorCooldown(
   return activePredatorCount / targetCaptureRate / handling;
 }
 
+export function captureSpeedFactor(config, school) {
+  const referenceSpeed = Math.max(
+    EPSILON,
+    config.capture.referenceCruiseSpeed
+  );
+  return Math.max(0, school.cruiseSpeed) / referenceSpeed;
+}
+
+export function effectiveSchoolCaptureRate(config, school) {
+  return (
+    Math.max(0, config.capture.targetCaptureRate) *
+    Math.max(0, school.captureRateMultiplier)
+  );
+}
+
 export function sustainedSpeedScale(config, school) {
   if (!config.traits?.enabled) return 1;
   return Math.max(
@@ -167,17 +182,18 @@ export function effectiveMaxSpeed(config, school, state = 'cruise') {
 
 export function metabolicRate(config, school, bursting = false) {
   const ecology = config.ecology;
+  const multiplier = Math.max(0, school.metabolismMultiplier);
   const sizeScale = Math.max(
     EPSILON,
     school.size ** ecology.basalSizeExponent
   );
-  const basal = ecology.basalRate / sizeScale;
+  const basal = (ecology.basalRate / sizeScale) * multiplier;
   if (!bursting) return basal;
   // Kleiber 定律对【活动代谢】同样适用：大动物的单位体重活动耗能也更低。
   // 原来 burstMetabolicRate 是平铺常数，导致大鱼的冲刺成本是自身基础代谢的
   // 4.2 倍（小鱼只有 2.75 倍）—— 大鱼追猎几下就饿死了。
   const burstScale = ecology.burstSizeScaled === false ? 1 : sizeScale;
-  return basal + ecology.burstMetabolicRate / burstScale;
+  return basal + (ecology.burstMetabolicRate / burstScale) * multiplier;
 }
 
 export function stepPlankton({
@@ -205,6 +221,22 @@ export function stepPlankton({
         ? consumed / requestedConsumption
         : 1,
   };
+}
+
+export function planktonIntake({
+  available,
+  maxIntake,
+  halfSaturation,
+}) {
+  const stock = Math.max(0, available);
+  const limit = Math.max(0, maxIntake);
+  const half = Math.max(0, halfSaturation);
+  if (stock <= EPSILON || limit <= EPSILON) return 0;
+  // Michaelis-Menten / Holling-II resource response: abundant plankton
+  // approaches the per-attempt ceiling, while sparse stock yields less food
+  // without ever consuming the protected seed floor.
+  const saturation = stock / (stock + half);
+  return Math.min(stock, limit * saturation);
 }
 
 export function ecologyOutcome(aliveCounts) {

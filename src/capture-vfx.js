@@ -352,7 +352,7 @@ export class CaptureVfx {
           Math.abs(Math.cos(phi)) * speed + speed * 0.4,
           Math.sin(phi) * Math.sin(theta) * speed
         ),
-        color: P.feedColor || '#dcf1e6',
+        color: P.feedColor || '#14532d',
         style: 'feed',
       });
     }

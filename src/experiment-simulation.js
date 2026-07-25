@@ -4,12 +4,15 @@ import {
   SeededRng,
   SpatialHash3D,
   captureRadius,
+  captureSpeedFactor,
   deriveExperiment,
   ecologyOutcome,
+  effectiveSchoolCaptureRate,
   effectiveMaxSpeed,
   effectiveTurnSpeed,
   metabolicRate,
   perPredatorCooldown,
+  planktonIntake,
   relationBetween,
   stepPlankton,
   sustainedSpeedScale,
@@ -100,6 +103,7 @@ export class ExperimentSimulation {
     this.relations = new RelationMatrix();
     this.hash = new SpatialHash3D(1);
     this.hiddenFish = -1;
+    this.locomotionPreview = false;
     this.captureVfx = null;
     this.planktonMesh = null;
     this.metricsState = {
@@ -179,6 +183,7 @@ export class ExperimentSimulation {
     this.schoolColors = config.schools.map((sc) => new THREE.Color(sc.color));
     this.locomotionStates = new Uint8Array(this.count);
     this.cooldowns = new Float32Array(this.count);
+    this.initialCooldownPhases = new Float32Array(this.count);
     this.wanderPhases = new Float32Array(this.count);
     this.wanderRates = new Float32Array(this.count);
     this.sameNeighbors = new Uint16Array(this.count);
@@ -385,7 +390,8 @@ export class ExperimentSimulation {
       const period = pursuitSchool
         ? perPredatorCooldown(
             this.derived.schools[schoolIndex].count,
-            this.config.capture.targetCaptureRate
+            effectiveSchoolCaptureRate(this.config, school),
+            captureSpeedFactor(this.config, school)
           )
         : Infinity;
       const wall = this.config.tank.wallMargin;
@@ -513,9 +519,21 @@ export class ExperimentSimulation {
           direction[1] * school.cruiseSpeed,
           direction[2] * school.cruiseSpeed
         );
-        this.cooldowns[index] = Number.isFinite(period)
-          ? this.rng.range(0, period)
-          : Infinity;
+        if (Number.isFinite(period)) {
+          this.initialCooldownPhases[index] = this.rng.next();
+          this.cooldowns[index] =
+            this.initialCooldownPhases[index] * period;
+        } else {
+          // Keep a deterministic latent phase for live tooling without
+          // perturbing the established spawn/wander RNG sequence.
+          const phaseSeed =
+            (this.seed ^
+              Math.imul(index + 1, 0x9e3779b1)) >>>
+            0;
+          this.initialCooldownPhases[index] =
+            new SeededRng(phaseSeed).next();
+          this.cooldowns[index] = Infinity;
+        }
         this.wanderPhases[index] = this.rng.range(0, Math.PI * 2);
         // 原来频率只有 index%13 共 13 档，整群会呈现可见的周期同步。
         this.wanderRates[index] = this.rng.range(0.55, 0.95);
@@ -553,6 +571,61 @@ export class ExperimentSimulation {
       this.mesh.instanceColor.needsUpdate = true;
     }
     this._syncPlanktonVisual();
+  }
+
+  setLocomotionPreview(enabled) {
+    const next = Boolean(enabled);
+    if (next === this.locomotionPreview) return;
+    this.locomotionPreview = next;
+    if (!next) return;
+    this._clearGameplayInteractionState();
+  }
+
+  _clearGameplayInteractionState() {
+    // TUNING is a clean, non-scoring preview. Clearing every interaction
+    // latch here guarantees a previous scene can never leak panic or pursuit
+    // state into the selection screen.
+    this.panic.fill(0);
+    this.threatLevel.fill(0);
+    this.neighborPanic.fill(0);
+    this.neighborEvade.fill(0);
+    this.emergencyAlign.fill(0);
+    this.emergencyUrgency.fill(0);
+    this.evadeForces.fill(0);
+    this.escapeDir.fill(0);
+    this.lockedTargets.fill(-1);
+    this.lockTimers.fill(0);
+    this.alarm.fill(0);
+    this.heardSignal.fill(0);
+    this.panicHold.fill(0);
+    this.refractory.fill(0);
+    this.directLatch.fill(0);
+    this.pursuitTargets.fill(-1);
+    this.lastPursuitTargets.fill(-1);
+    this.chaseStartTimes.fill(-1);
+    this.locomotionStates.fill(LOCOMOTION.CRUISE);
+  }
+
+  beginGameplayFromPreview() {
+    const visibleMotion = {
+      positions: this.positions.slice(),
+      velocities: this.velocities.slice(),
+      rollAngles: this.rollAngles.slice(),
+      prevHeadings: this.prevHeadings.slice(),
+      avoidanceDirections: this.avoidanceDirections.slice(),
+    };
+    this.locomotionPreview = false;
+    // Reset from the submitted config so relation hysteresis, cooldowns,
+    // energy and the future ecology RNG exactly match direct balance trials.
+    // Restore only visible kinematics afterward; no frame is rendered between
+    // reset and restore, so Start remains spatially continuous.
+    this.reset(this.config.runtime.seed);
+    this.positions.set(visibleMotion.positions);
+    this.velocities.set(visibleMotion.velocities);
+    this.rollAngles.set(visibleMotion.rollAngles);
+    this.prevHeadings.set(visibleMotion.prevHeadings);
+    this.avoidanceDirections.set(visibleMotion.avoidanceDirections);
+    this.updateMesh();
   }
 
   _syncVfxBounds() {
@@ -688,7 +761,15 @@ export class ExperimentSimulation {
     }
   }
 
-  _sameSchoolPair(i, j, dx, dy, dz, distance2) {
+  _sameSchoolPair(
+    i,
+    j,
+    dx,
+    dy,
+    dz,
+    distance2,
+    interactionsEnabled = true
+  ) {
     const schoolIndex = this.schoolIds[i];
     const derived = this.derived.schools[schoolIndex];
     const perception = this.config.perception;
@@ -749,8 +830,12 @@ export class ExperimentSimulation {
       }
       return true;
     };
-    const emergencyIJ = emitEmergency(i, j, seeIJ);
-    const emergencyJI = emitEmergency(j, i, seeJI);
+    const emergencyIJ = interactionsEnabled
+      ? emitEmergency(i, j, seeIJ)
+      : false;
+    const emergencyJI = interactionsEnabled
+      ? emitEmergency(j, i, seeJI)
+      : false;
 
     if (distance2 <= derived.cohesionRadius ** 2) {
       this.sameNeighbors[i] += 1;
@@ -759,7 +844,7 @@ export class ExperimentSimulation {
       // 同样走视锥 —— 波因此有方向性，而不是向四面八方瞬间铺开。
       const jo3 = j * 3;
       const io3 = i * 3;
-      if (seeIJ) {
+      if (interactionsEnabled && seeIJ) {
         // 社会信号传的是 alarm【脉冲】，不是 panic 值 —— 脉冲会衰减到零，
         // 不会像连续值那样在鱼群里无限回响。
         const signal =
@@ -776,7 +861,7 @@ export class ExperimentSimulation {
           this.escapeDir[jo3 + 2]
         );
       }
-      if (seeJI) {
+      if (interactionsEnabled && seeJI) {
         const signalBack =
           this.alarm[i] * (1 - Math.sqrt(distance2) / derived.cohesionRadius);
         if (signalBack > this.heardSignal[j]) this.heardSignal[j] = signalBack;
@@ -868,7 +953,15 @@ export class ExperimentSimulation {
     }
   }
 
-  _crossSchoolPair(i, j, dx, dy, dz, distance2) {
+  _crossSchoolPair(
+    i,
+    j,
+    dx,
+    dy,
+    dz,
+    distance2,
+    interactionsEnabled = true
+  ) {
     const schoolI = this.schoolIds[i];
     const schoolJ = this.schoolIds[j];
     const configSchoolI = this.config.schools[schoolI];
@@ -884,8 +977,10 @@ export class ExperimentSimulation {
       add3(this.separation, j, dx * scale, dy * scale, dz * scale);
     }
 
-    this._directedRelation(i, j, dx, dy, dz, distance, distance2);
-    this._directedRelation(j, i, -dx, -dy, -dz, distance, distance2);
+    if (interactionsEnabled) {
+      this._directedRelation(i, j, dx, dy, dz, distance, distance2);
+      this._directedRelation(j, i, -dx, -dy, -dz, distance, distance2);
+    }
   }
 
   _directedRelation(
@@ -990,7 +1085,7 @@ export class ExperimentSimulation {
     }
   }
 
-  _pairPasses() {
+  _pairPasses(interactionsEnabled = true) {
     this.hash.forEachPair((i, j) => {
       this.metricsState.pairCount += 1;
       const io = i * 3;
@@ -1000,7 +1095,15 @@ export class ExperimentSimulation {
       const dz = this.positions[jo + 2] - this.positions[io + 2];
       const distance2 = dx * dx + dy * dy + dz * dz;
       if (this.schoolIds[i] === this.schoolIds[j]) {
-        this._sameSchoolPair(i, j, dx, dy, dz, distance2);
+        this._sameSchoolPair(
+          i,
+          j,
+          dx,
+          dy,
+          dz,
+          distance2,
+          interactionsEnabled
+        );
       }
     });
     this.hash.forEachPair((i, j) => {
@@ -1011,7 +1114,15 @@ export class ExperimentSimulation {
       const dy = this.positions[jo + 1] - this.positions[io + 1];
       const dz = this.positions[jo + 2] - this.positions[io + 2];
       const distance2 = dx * dx + dy * dy + dz * dz;
-      this._crossSchoolPair(i, j, dx, dy, dz, distance2);
+      this._crossSchoolPair(
+        i,
+        j,
+        dx,
+        dy,
+        dz,
+        distance2,
+        interactionsEnabled
+      );
     });
   }
 
@@ -1087,9 +1198,9 @@ export class ExperimentSimulation {
     }
   }
 
-  _steerFish(index, dt) {
+  _steerFish(index, dt, interactionsEnabled = true) {
     if (!this.alive[index]) return;
-    this._resolveLock(index, dt);
+    if (interactionsEnabled) this._resolveLock(index, dt);
     const offset = index * 3;
     const schoolIndex = this.schoolIds[index];
     const school = this.config.schools[schoolIndex];
@@ -1101,57 +1212,64 @@ export class ExperimentSimulation {
     const relations = this.config.relations;
     // --- 脉冲/闩锁式恐慌 ---
     // 直接威胁走滞回：越过 directOn 才闩上，掉到 directOff 以下才松开。
-    const threat = this.threatLevel[index];
-    const wasLatched = this.directLatch[index] === 1;
-    if (!wasLatched && threat >= relations.directOn) {
-      this.directLatch[index] = 1;
-    } else if (wasLatched && threat < relations.directOff) {
-      this.directLatch[index] = 0;
-    }
-    const latched = this.directLatch[index] === 1;
-    const enteredDirect = latched && !wasLatched;
+    let panic = 0;
+    if (interactionsEnabled) {
+      const threat = this.threatLevel[index];
+      const wasLatched = this.directLatch[index] === 1;
+      if (!wasLatched && threat >= relations.directOn) {
+        this.directLatch[index] = 1;
+      } else if (wasLatched && threat < relations.directOff) {
+        this.directLatch[index] = 0;
+      }
+      const latched = this.directLatch[index] === 1;
+      const enteredDirect = latched && !wasLatched;
 
-    this.panicHold[index] = Math.max(0, this.panicHold[index] - dt);
-    this.refractory[index] = Math.max(0, this.refractory[index] - dt);
+      this.panicHold[index] = Math.max(0, this.panicHold[index] - dt);
+      this.refractory[index] = Math.max(0, this.refractory[index] - dt);
 
-    // 社会触发：收到的脉冲够强、自己没被直接威胁闩住、且不在不应期内。
-    // 不应期是关键 —— 没有它，脉冲会在鱼群里来回反射永不停止。
-    let emitPulse = enteredDirect;
-    if (
-      !latched &&
-      this.heardSignal[index] >= relations.signalThreshold &&
-      this.refractory[index] <= 0
-    ) {
-      emitPulse = true;
-      this.refractory[index] = relations.refractoryTime;
-    }
-    if (emitPulse) this.panicHold[index] = relations.holdTime;
-    if (enteredDirect) {
-      this.refractory[index] = Math.max(
-        this.refractory[index],
-        relations.refractoryTime
+      // 社会触发：收到的脉冲够强、自己没被直接威胁闩住、且不在不应期内。
+      // 不应期是关键 —— 没有它，脉冲会在鱼群里来回反射永不停止。
+      let emitPulse = enteredDirect;
+      if (
+        !latched &&
+        this.heardSignal[index] >= relations.signalThreshold &&
+        this.refractory[index] <= 0
+      ) {
+        emitPulse = true;
+        this.refractory[index] = relations.refractoryTime;
+      }
+      if (emitPulse) this.panicHold[index] = relations.holdTime;
+      if (enteredDirect) {
+        this.refractory[index] = Math.max(
+          this.refractory[index],
+          relations.refractoryTime
+        );
+      }
+
+      // 惊吓期间恐慌被【钉在满值】，这才有四散而逃
+      const panicTarget = Math.max(
+        latched ? threat : 0,
+        this.panicHold[index] > 0 ? 1 : 0
       );
+      const rising = panicTarget > this.panic[index];
+      this.panic[index] = approach(
+        this.panic[index],
+        panicTarget,
+        rising ? relations.panicRiseRate : relations.panicDecayRate,
+        dt
+      );
+      this.alarm[index] = emitPulse
+        ? 1
+        : this.alarm[index] *
+          Math.exp(-dt / Math.max(relations.signalDecayTime, 1e-6));
+      panic = this.panic[index];
     }
-
-    // 惊吓期间恐慌被【钉在满值】，这才有四散而逃
-    const panicTarget = Math.max(latched ? threat : 0, this.panicHold[index] > 0 ? 1 : 0);
-    const rising = panicTarget > this.panic[index];
-    this.panic[index] = approach(
-      this.panic[index],
-      panicTarget,
-      rising ? relations.panicRiseRate : relations.panicDecayRate,
-      dt
-    );
-    this.alarm[index] = emitPulse
-      ? 1
-      : this.alarm[index] *
-        Math.exp(-dt / Math.max(relations.signalDecayTime, 1e-6));
-    const panic = this.panic[index];
     // 受惊时凝聚力下降 —— flash expansion（原版验证过的方向）。
     // 同步不靠放大 alignmentWeight，而靠下面独立的应急对齐通道。
     // 冲刺时压低社交权重（而不是把追击力放大 10 倍）。捕食者会"脱队扑食"，
     // 但整体力量级不变，运动仍然平滑；松开后自己归队。
     const lockedOn =
+      interactionsEnabled &&
       this.pursuitTargets[index] >= 0 && this.alive[this.pursuitTargets[index]];
     const socialScale = lockedOn
       ? this.config.locomotion.burstSocialSuppression
@@ -1168,10 +1286,12 @@ export class ExperimentSimulation {
       socialScale *
       sizeSocial;
     // 接收方增益：自己越慌，越会去听邻居 —— 波才能一层层推下去
-    const receiverBoost = Math.min(
-      1 + relations.alignmentReceiverBoost * this.neighborPanic[index],
-      relations.alignmentReceiverMax
-    );
+    const receiverBoost = interactionsEnabled
+      ? Math.min(
+          1 + relations.alignmentReceiverBoost * this.neighborPanic[index],
+          relations.alignmentReceiverMax
+        )
+      : 1;
     const alignmentWeight =
       school.alignmentWeight * receiverBoost * socialScale * sizeSocial;
 
@@ -1256,7 +1376,7 @@ export class ExperimentSimulation {
     }
     // 应急对齐：一条鱼看见危险，它的航向会压过二十条镇定邻居的平均值。
     // 这是惊扰波真正的载体。
-    if (this.emergencyUrgency[index] > 0) {
+    if (interactionsEnabled && this.emergencyUrgency[index] > 0) {
       const emergency = normalize3(
         this.emergencyAlign[offset],
         this.emergencyAlign[offset + 1],
@@ -1271,8 +1391,11 @@ export class ExperimentSimulation {
     }
 
     // 逃逸强度随恐慌连续变化，不再是"看见/没看见"的开关
-    const directThreat = this.threatLevel[index];
-    const threatened = panic > relations.panicMinTrigger;
+    const directThreat = interactionsEnabled
+      ? this.threatLevel[index]
+      : 0;
+    const threatened =
+      interactionsEnabled && panic > relations.panicMinTrigger;
     if (directThreat > 0) {
       applyRule(
         this.escapeDir[offset],
@@ -1282,7 +1405,9 @@ export class ExperimentSimulation {
       );
     }
 
-    const localPredationCount = this.predationCounts[index];
+    const localPredationCount = interactionsEnabled
+      ? this.predationCounts[index]
+      : 0;
     if (localPredationCount > 0) {
       applyRule(
         this.predationSums[offset] / localPredationCount -
@@ -1295,7 +1420,9 @@ export class ExperimentSimulation {
       );
     }
 
-    const target = this.pursuitTargets[index];
+    const target = interactionsEnabled
+      ? this.pursuitTargets[index]
+      : -1;
     if (target >= 0 && this.alive[target] && this._canBurst(index)) {
       const targetOffset = target * 3;
       const distance = Math.sqrt(this.targetDistance2[index]);
@@ -1389,11 +1516,13 @@ export class ExperimentSimulation {
     fy += Math.sin(phase * 1.73 + 2.1) * this.config.locomotion.wanderWeight;
     fz += Math.cos(phase * 1.17) * this.config.locomotion.wanderWeight;
 
-    const dynamic = this.physics?.interactFish(point, [
-      this.velocities[offset],
-      this.velocities[offset + 1],
-      this.velocities[offset + 2],
-    ]);
+    const dynamic = interactionsEnabled
+      ? this.physics?.interactFish(point, [
+          this.velocities[offset],
+          this.velocities[offset + 1],
+          this.velocities[offset + 2],
+        ])
+      : null;
     if (dynamic) {
       fx += dynamic.force[0] * this.config.locomotion.avoidanceWeight;
       fy += dynamic.force[1] * this.config.locomotion.avoidanceWeight;
@@ -1565,6 +1694,7 @@ export class ExperimentSimulation {
     if (!this.config.ecology?.enabled) return;
     // 浮游生物重新启用：logistic 再生的场模型。浮尸能量更高，所以
     // 觅食时先找浮尸，没有才吃浮游。
+    let planktonFloorLevel = 0;
     if (this.config.plankton.enabled) {
       const stepped = stepPlankton({
         level: this.planktonLevel,
@@ -1577,10 +1707,13 @@ export class ExperimentSimulation {
         dt,
       });
       // 下限：logistic 在 level=0 时 growth=0，一旦吃光就永不恢复。
-      const floorLevel =
+      planktonFloorLevel =
         this.config.plankton.capacity *
         (this.config.plankton.minFraction ?? 0.01);
-      this.planktonLevel = Math.max(floorLevel, stepped.level ?? stepped);
+      this.planktonLevel = Math.max(
+        planktonFloorLevel,
+        stepped.level ?? stepped
+      );
     } else {
       this.planktonLevel = 0;
     }
@@ -1607,7 +1740,8 @@ export class ExperimentSimulation {
     );
     const capacityLimit = this.config.ecology.energyCapacity;
     const planktonOn =
-      this.config.plankton.enabled && this.planktonLevel > 0;
+      this.config.plankton.enabled &&
+      this.planktonLevel > planktonFloorLevel + EPSILON;
 
     for (let index = 0; index < this.count; index += 1) {
       if (!this.alive[index]) continue;
@@ -1652,15 +1786,39 @@ export class ExperimentSimulation {
         ate = true;
         carrionEaten += 1;
       } else if (planktonOn) {
-        const intake = Math.min(
-          this.planktonLevel,
+        const maxIntake = Math.max(
+          0,
           this.config.plankton.maxIntakePerFish
         );
+        // minFraction 是维持 logistic 再生的种源，不是每帧可重复领取的
+        // 免费食物。只有高于种源线的真实存量可以被摄食。
+        const available = Math.max(
+          0,
+          this.planktonLevel - planktonFloorLevel
+        );
+        const intake = planktonIntake({
+          available,
+          maxIntake,
+          halfSaturation:
+            this.config.plankton.capacity *
+            Math.max(
+              0,
+              this.config.plankton.halfSaturationFraction ?? 0
+            ),
+        });
         if (intake > 0) {
           this.planktonLevel -= intake;
           this.planktonConsumed += intake;
-          // grazeRate 决定转化效率：小鱼大幅恢复，大鱼几乎没用
-          gain = planktonEnergy * school.grazeRate * forageMul;
+          // 满摄入保持既有恢复量；资源不足时按真实摄入等比下降。
+          // energyConversion 终于成为有效参数，而不是只出现在面板。
+          const intakeFraction =
+            maxIntake > EPSILON ? intake / maxIntake : 0;
+          gain =
+            planktonEnergy *
+            intakeFraction *
+            Math.max(0, this.config.plankton.energyConversion ?? 1) *
+            school.grazeRate *
+            forageMul;
           ate = true;
         }
       }
@@ -1799,8 +1957,14 @@ export class ExperimentSimulation {
       }
       this.cooldowns[predator] = perPredatorCooldown(
         this._activeSchoolCount(predatorSchool),
-        this.config.capture.targetCaptureRate,
-        this.config.schools[predatorSchool].cruiseSpeed / 0.23
+        effectiveSchoolCaptureRate(
+          this.config,
+          this.config.schools[predatorSchool]
+        ),
+        captureSpeedFactor(
+          this.config,
+          this.config.schools[predatorSchool]
+        )
       );
     }
   }
@@ -1835,9 +1999,32 @@ export class ExperimentSimulation {
     this.updateMesh();
   }
 
+  _advanceLocomotionPreview(dt) {
+    this.derived = deriveExperiment(this.config);
+    this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
+    this.relationMatrix = this.relations.update(
+      this.config.schools,
+      this.config.relations
+    );
+    this._clearAccumulators();
+    this.hash.build(this.positions, this.alive, this.count);
+    this._pairPasses(false);
+    for (let index = 0; index < this.count; index += 1) {
+      this._steerFish(index, dt, false);
+    }
+    for (let index = 0; index < this.count; index += 1) {
+      this._integrate(index, dt);
+    }
+    this.updateMesh();
+  }
+
   step(dt) {
     const start = performance.now();
-    this._advance(dt);
+    if (this.locomotionPreview) {
+      this._advanceLocomotionPreview(dt);
+    } else {
+      this._advance(dt);
+    }
     const frameMs = performance.now() - start;
     this.metricsState.frameMs = approach(
       this.metricsState.frameMs,
@@ -1849,7 +2036,7 @@ export class ExperimentSimulation {
       this.metricsState.frameMs > 0
         ? Math.min(999, 1000 / this.metricsState.frameMs)
         : 0;
-    this.captureVfx?.step(dt);
+    if (!this.locomotionPreview) this.captureVfx?.step(dt);
   }
 
   updateMesh() {
@@ -2067,7 +2254,8 @@ export class ExperimentSimulation {
           captureRadius: radius,
           perPredatorCooldown: perPredatorCooldown(
             this._activeSchoolCount(actor),
-            this.config.capture.targetCaptureRate
+            effectiveSchoolCaptureRate(this.config, actorSchool),
+            captureSpeedFactor(this.config, actorSchool)
           ),
           pursuitSpeed,
           evadeSpeed,
