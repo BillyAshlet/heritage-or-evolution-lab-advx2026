@@ -152,12 +152,6 @@ export function effectiveMaxSpeed(config, school, state = 'cruise') {
   if (state === 'evade') {
     return sustainedMax * config.locomotion.panicSpeedFactor;
   }
-  if (state === 'stalk') {
-    return sustainedMax * (config.traits?.stalkSpeedFactor ?? 1);
-  }
-  if (state === 'recover') {
-    return sustainedMax * (config.traits?.recoverySpeedFactor ?? 1);
-  }
   return sustainedMax;
 }
 

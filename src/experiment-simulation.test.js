@@ -67,7 +67,7 @@ test('direct threat is proximity-driven even when pursuit target selection loses
   const predator = simulation.schoolRanges[1].start;
   simulation.positions.fill(0);
   simulation.sameNeighbors[prey] = 5;
-  simulation.targetIsolation[predator] = 0;
+  simulation.targetAlignment[predator] = 2;
   simulation.targetDistance2[predator] = 0;
   simulation.pursuitTargets[predator] = -1;
   simulation._directedRelation(
@@ -81,6 +81,64 @@ test('direct threat is proximity-driven even when pursuit target selection loses
   );
   assert.equal(simulation.pursuitTargets[predator], -1);
   assert.equal(simulation.threatCounts[prey], 1);
+});
+
+test('predation uses broad prey cohesion before the smaller burst layer', () => {
+  const simulation = smallSimulation();
+  const prey = 0;
+  const predator = simulation.schoolRanges[1].start;
+  const detection =
+    simulation.derived.schools[simulation.schoolIds[predator]]
+      .detectionLength;
+  const burstRadius =
+    detection * simulation.config.relations.burstRadiusFactor;
+  const distance = (detection + burstRadius) / 2;
+  simulation.positions.fill(0);
+  simulation.positions[prey * 3] = distance;
+  simulation.velocities[predator * 3] = 1;
+  simulation._directedRelation(
+    predator,
+    prey,
+    distance,
+    0,
+    0,
+    distance,
+    distance * distance
+  );
+  assert.equal(simulation.predationCounts[predator], 1);
+  assert.equal(simulation.pursuitTargets[predator], -1);
+});
+
+test('burst target prefers the prey closest to the current heading', () => {
+  const simulation = smallSimulation();
+  const forwardPrey = 0;
+  const nearerSidePrey = 1;
+  const predator = simulation.schoolRanges[1].start;
+  simulation.positions.fill(0);
+  simulation.velocities.fill(0);
+  simulation.velocities[predator * 3] = 1;
+  simulation._directedRelation(
+    predator,
+    nearerSidePrey,
+    0,
+    0.01,
+    0,
+    0.01,
+    0.0001
+  );
+  simulation._directedRelation(
+    predator,
+    forwardPrey,
+    0.02,
+    0,
+    0,
+    0.02,
+    0.0004
+  );
+  assert.equal(simulation.pursuitTargets[predator], forwardPrey);
+  assert.equal(simulation.locomotionStates[predator], 0);
+  assert.equal('stamina' in simulation, false);
+  assert.equal('stamina' in simulation.fish(predator), false);
 });
 
 test('predation mode captures at visual distance and death stays permanent', () => {

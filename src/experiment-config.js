@@ -99,6 +99,8 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     k: 1.35,
     hysteresis: 0.1,
     pursuitWeight: 1.05,
+    burstRadiusFactor: 0.75,
+    burstWeight: 10,
     evadeWeight: 1.3,
     evadeLateralWeight: 0.32,
     directThreatPanic: 0.85,
@@ -122,13 +124,6 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     minSustainedSpeedFactor: 0.55,
     sizeTurnPenaltyExponent: 0.55,
     minTurnFactor: 0.45,
-    stalkSpeedFactor: 0.82,
-    recoverySpeedFactor: 0.72,
-    ambushDistanceFactor: 0.68,
-    staminaDrainRate: 0.28,
-    staminaRecoveryRate: 0.16,
-    burstStartStamina: 0.45,
-    burstStopStamina: 0.12,
   },
   ecology: {
     energyCapacity: 1,
@@ -452,10 +447,22 @@ const scalarEntries = [
     max: 0.5,
     step: 0.01,
   }),
-  entry('relations.pursuitWeight', '关系', 'pursuit weight', 'live', {
+  entry('relations.pursuitWeight', '关系', '捕猎凝聚 weight', 'live', {
     min: 0,
     max: 4,
     step: 0.05,
+  }),
+  entry(
+    'relations.burstRadiusFactor',
+    '关系',
+    'burst radius × 大范围',
+    'live',
+    { min: 0.05, max: 1, step: 0.01 }
+  ),
+  entry('relations.burstWeight', '关系', 'burst weight', 'live', {
+    min: 0,
+    max: 20,
+    step: 0.25,
   }),
   entry('relations.evadeWeight', '关系', 'evade weight', 'live', {
     min: 0,
@@ -567,55 +574,6 @@ const scalarEntries = [
     'min turn ×',
     'live',
     { min: 0.1, max: 1, step: 0.01 }
-  ),
-  entry(
-    'traits.stalkSpeedFactor',
-    'Trait Coupling',
-    'stalk speed ×',
-    'live',
-    { min: 0.1, max: 1.5, step: 0.01 }
-  ),
-  entry(
-    'traits.recoverySpeedFactor',
-    'Trait Coupling',
-    'recovery speed ×',
-    'live',
-    { min: 0.1, max: 1.5, step: 0.01 }
-  ),
-  entry(
-    'traits.ambushDistanceFactor',
-    'Trait Coupling',
-    'ambush distance ×',
-    'live',
-    { min: 0.1, max: 1, step: 0.01 }
-  ),
-  entry(
-    'traits.staminaDrainRate',
-    'Trait Coupling',
-    'stamina drain /s',
-    'live',
-    { min: 0, max: 3, step: 0.01 }
-  ),
-  entry(
-    'traits.staminaRecoveryRate',
-    'Trait Coupling',
-    'stamina recovery /s',
-    'live',
-    { min: 0, max: 3, step: 0.01 }
-  ),
-  entry(
-    'traits.burstStartStamina',
-    'Trait Coupling',
-    'burst start stamina',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry(
-    'traits.burstStopStamina',
-    'Trait Coupling',
-    'burst stop stamina',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
   ),
   entry(
     'ecology.energyCapacity',
@@ -1243,12 +1201,6 @@ export function validateConfig(candidate) {
     candidate.locomotion?.panicSpeedFactor
   ) {
     warnings.push('burstFactor ≤ panicSpeedFactor：捕食者可能无法闭合距离');
-  }
-  if (
-    candidate.traits?.burstStartStamina <=
-    candidate.traits?.burstStopStamina
-  ) {
-    errors.push('burstStartStamina 必须大于 burstStopStamina');
   }
   return { valid: errors.length === 0, errors, warnings };
 }

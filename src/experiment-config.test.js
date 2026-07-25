@@ -57,6 +57,13 @@ test('default project is the live size-derived aquarium', () => {
   assert.equal('policy' in config.relations, false);
   assert.equal('holding' in config, false);
   assert.equal('cascadeJudge' in config, false);
+  assert.equal('staminaDrainRate' in config.traits, false);
+  assert.equal('stalkSpeedFactor' in config.traits, false);
+  assert.equal(config.relations.burstRadiusFactor < 1, true);
+  assert.equal(
+    config.relations.burstWeight > config.relations.pursuitWeight,
+    true
+  );
   assert.equal(config.captureVfx.enabled, true);
 });
 

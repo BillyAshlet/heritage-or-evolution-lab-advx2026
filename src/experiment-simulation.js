@@ -22,17 +22,13 @@ const EPSILON = 1e-8;
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const LOCOMOTION = Object.freeze({
   CRUISE: 0,
-  STALK: 1,
-  BURST: 2,
-  EVADE: 3,
-  RECOVER: 4,
+  BURST: 1,
+  EVADE: 2,
 });
 const LOCOMOTION_LABEL = Object.freeze([
   'cruise',
-  'stalk',
   'burst',
   'evade',
-  'recover',
 ]);
 
 function clamp(value, min, max) {
@@ -112,6 +108,7 @@ export class ExperimentSimulation {
     this.forces = new Float32Array(this.count * 3);
     this.separation = new Float32Array(this.count * 3);
     this.cohesionSums = new Float32Array(this.count * 3);
+    this.predationSums = new Float32Array(this.count * 3);
     this.alignmentSums = new Float32Array(this.count * 3);
     this.evadeForces = new Float32Array(this.count * 3);
     this.avoidanceDirections = new Float32Array(this.count * 3);
@@ -119,18 +116,18 @@ export class ExperimentSimulation {
     this.alive = new Uint8Array(this.count);
     this.panic = new Float32Array(this.count);
     this.energy = new Float32Array(this.count);
-    this.stamina = new Float32Array(this.count);
     this.locomotionStates = new Uint8Array(this.count);
     this.cooldowns = new Float32Array(this.count);
     this.wanderPhases = new Float32Array(this.count);
     this.sameNeighbors = new Uint16Array(this.count);
     this.cohesionCounts = new Uint16Array(this.count);
+    this.predationCounts = new Uint16Array(this.count);
     this.alignmentCounts = new Uint16Array(this.count);
     this.threatCounts = new Uint16Array(this.count);
     this.pursuitTargets = new Int32Array(this.count);
     this.lastPursuitTargets = new Int32Array(this.count);
     this.chaseStartTimes = new Float64Array(this.count);
-    this.targetIsolation = new Uint16Array(this.count);
+    this.targetAlignment = new Float32Array(this.count);
     this.targetDistance2 = new Float32Array(this.count);
     this.schoolCenters = new Float32Array(config.schools.length * 3);
     this.schoolAliveCounts = new Uint16Array(config.schools.length);
@@ -266,10 +263,9 @@ export class ExperimentSimulation {
       this.config.ecology.energyCapacity *
         this.config.ecology.initialEnergyRatio
     );
-    this.stamina.fill(1);
     this.locomotionStates.fill(LOCOMOTION.CRUISE);
     this.pursuitTargets.fill(-1);
-    this.targetIsolation.fill(65535);
+    this.targetAlignment.fill(-Infinity);
     this.targetDistance2.fill(Infinity);
     this.lastPursuitTargets.fill(-1);
     this.chaseStartTimes.fill(-1);
@@ -418,14 +414,16 @@ export class ExperimentSimulation {
     this.forces.fill(0);
     this.separation.fill(0);
     this.cohesionSums.fill(0);
+    this.predationSums.fill(0);
     this.alignmentSums.fill(0);
     this.evadeForces.fill(0);
     this.sameNeighbors.fill(0);
     this.cohesionCounts.fill(0);
+    this.predationCounts.fill(0);
     this.alignmentCounts.fill(0);
     this.threatCounts.fill(0);
     this.pursuitTargets.fill(-1);
-    this.targetIsolation.fill(65535);
+    this.targetAlignment.fill(-Infinity);
     this.targetDistance2.fill(Infinity);
     this.metricsState.pairCount = 0;
     this.metricsState.dynamicContacts = 0;
@@ -594,14 +592,37 @@ export class ExperimentSimulation {
     const actorDetection =
       this.derived.schools[actorSchool].detectionLength;
     if (distance2 <= actorDetection * actorDetection) {
-      const isolation = this.sameNeighbors[target];
+      add3(
+        this.predationSums,
+        actor,
+        this.positions[target * 3],
+        this.positions[target * 3 + 1],
+        this.positions[target * 3 + 2]
+      );
+      this.predationCounts[actor] += 1;
+    }
+
+    const burstRadius =
+      actorDetection * this.config.relations.burstRadiusFactor;
+    if (distance2 <= burstRadius * burstRadius) {
+      const actorOffset = actor * 3;
+      const speed = normalize3(
+        this.velocities[actorOffset],
+        this.velocities[actorOffset + 1],
+        this.velocities[actorOffset + 2]
+      );
+      const inverseDistance = 1 / Math.max(distance, EPSILON);
+      const alignment =
+        speed[0] * dx * inverseDistance +
+        speed[1] * dy * inverseDistance +
+        speed[2] * dz * inverseDistance;
       if (
-        isolation < this.targetIsolation[actor] ||
-        (isolation === this.targetIsolation[actor] &&
+        alignment > this.targetAlignment[actor] ||
+        (alignment === this.targetAlignment[actor] &&
           distance2 < this.targetDistance2[actor])
       ) {
         this.pursuitTargets[actor] = target;
-        this.targetIsolation[actor] = isolation;
+        this.targetAlignment[actor] = alignment;
         this.targetDistance2[actor] = distance2;
       }
     }
@@ -686,66 +707,19 @@ export class ExperimentSimulation {
     return force;
   }
 
-  _movementState(index, target, threatened, dt) {
-    if (!this.config.traits.enabled) {
-      const state = target >= 0 ? 'pursuit' : threatened ? 'evade' : 'cruise';
-      this.locomotionStates[index] =
-        target >= 0
-          ? LOCOMOTION.BURST
-          : threatened
-            ? LOCOMOTION.EVADE
-            : LOCOMOTION.CRUISE;
-      this.stamina[index] = 1;
-      return state;
-    }
-    let state = 'cruise';
-    let code = LOCOMOTION.CRUISE;
-    if (threatened) {
-      state = 'evade';
-      code = LOCOMOTION.EVADE;
-    } else if (target >= 0 && this.alive[target]) {
-      const current = this.locomotionStates[index];
-      const stamina = this.stamina[index];
-      const recovering =
-        current === LOCOMOTION.RECOVER &&
-        stamina < this.config.traits.burstStartStamina;
-      if (
-        recovering ||
-        stamina <= this.config.traits.burstStopStamina
-      ) {
-        state = 'recover';
-        code = LOCOMOTION.RECOVER;
-      } else {
-        const schoolIndex = this.schoolIds[index];
-        const ambushDistance =
-          this.derived.schools[schoolIndex].detectionLength *
-          this.config.traits.ambushDistanceFactor;
-        const distance = Math.sqrt(
-          Math.max(0, this.targetDistance2[index])
-        );
-        if (distance > ambushDistance) {
-          state = 'stalk';
-          code = LOCOMOTION.STALK;
-        } else {
-          state = 'burst';
-          code = LOCOMOTION.BURST;
-        }
-      }
-    }
-    if (code === LOCOMOTION.BURST) {
-      this.stamina[index] = Math.max(
-        0,
-        this.stamina[index] -
-          this.config.traits.staminaDrainRate * dt
-      );
-    } else {
-      this.stamina[index] = Math.min(
-        1,
-        this.stamina[index] +
-          this.config.traits.staminaRecoveryRate * dt
-      );
-    }
-    this.locomotionStates[index] = code;
+  _movementState(index, target, threatened) {
+    const state =
+      target >= 0 && this.alive[target]
+        ? 'burst'
+        : threatened
+          ? 'evade'
+          : 'cruise';
+    this.locomotionStates[index] =
+      state === 'burst'
+        ? LOCOMOTION.BURST
+        : state === 'evade'
+          ? LOCOMOTION.EVADE
+          : LOCOMOTION.CRUISE;
     return state;
   }
 
@@ -823,6 +797,53 @@ export class ExperimentSimulation {
         this.evadeForces[offset + 2] * this.config.relations.evadeWeight;
     }
 
+    const localPredationCount = this.predationCounts[index];
+    if (localPredationCount > 0) {
+      fx +=
+        (this.predationSums[offset] / localPredationCount -
+          this.positions[offset]) *
+        this.config.relations.pursuitWeight;
+      fy +=
+        (this.predationSums[offset + 1] / localPredationCount -
+          this.positions[offset + 1]) *
+        this.config.relations.pursuitWeight;
+      fz +=
+        (this.predationSums[offset + 2] / localPredationCount -
+          this.positions[offset + 2]) *
+        this.config.relations.pursuitWeight;
+    } else {
+      let preyCount = 0;
+      let preyX = 0;
+      let preyY = 0;
+      let preyZ = 0;
+      for (
+        let preySchool = 0;
+        preySchool < this.config.schools.length;
+        preySchool += 1
+      ) {
+        if (this.relationMatrix[schoolIndex][preySchool] !== 'pursuit') {
+          continue;
+        }
+        const aliveCount = this.schoolAliveCounts[preySchool];
+        const preyOffset = preySchool * 3;
+        preyCount += aliveCount;
+        preyX += this.schoolCenters[preyOffset] * aliveCount;
+        preyY += this.schoolCenters[preyOffset + 1] * aliveCount;
+        preyZ += this.schoolCenters[preyOffset + 2] * aliveCount;
+      }
+      if (preyCount > 0) {
+        fx +=
+          (preyX / preyCount - this.positions[offset]) *
+          this.config.relations.pursuitWeight;
+        fy +=
+          (preyY / preyCount - this.positions[offset + 1]) *
+          this.config.relations.pursuitWeight;
+        fz +=
+          (preyZ / preyCount - this.positions[offset + 2]) *
+          this.config.relations.pursuitWeight;
+      }
+    }
+
     const target = this.pursuitTargets[index];
     if (target >= 0 && this.alive[target]) {
       const targetOffset = target * 3;
@@ -845,11 +866,7 @@ export class ExperimentSimulation {
         iy - this.positions[offset + 1],
         iz - this.positions[offset + 2]
       );
-      const panicSuppression =
-        this.config.schools.length >= 3 ? 1 - this.panic[index] : 1;
-      const weight =
-        this.config.relations.pursuitWeight *
-        Math.max(0, panicSuppression);
+      const weight = this.config.relations.burstWeight;
       fx += pursuit[0] * weight;
       fy += pursuit[1] * weight;
       fz += pursuit[2] * weight;
@@ -916,8 +933,13 @@ export class ExperimentSimulation {
     }
 
     const force = normalize3(fx, fy, fz);
+    const forceBudget =
+      target >= 0 && this.alive[target]
+        ? this.config.locomotion.maxForce *
+          Math.max(1, this.config.relations.burstWeight)
+        : this.config.locomotion.maxForce;
     const forceMagnitude = Math.min(
-      this.config.locomotion.maxForce,
+      forceBudget,
       force[3]
     );
     const oldVx = this.velocities[offset];
@@ -952,12 +974,7 @@ export class ExperimentSimulation {
     if (desiredSpeed < cruiseSpeed) {
       desiredSpeed = approach(desiredSpeed, cruiseSpeed, 3, dt);
     }
-    const state = this._movementState(
-      index,
-      target,
-      threatened,
-      dt
-    );
+    const state = this._movementState(index, target, threatened);
     const maxSpeed = effectiveMaxSpeed(this.config, school, state);
     desiredSpeed = Math.min(maxSpeed, desiredSpeed);
     nextVx = turned[0] * desiredSpeed;
@@ -1293,18 +1310,6 @@ export class ExperimentSimulation {
     return count > 0 ? total / count : 0;
   }
 
-  averageStamina(schoolIndex) {
-    const range = this.schoolRanges[schoolIndex];
-    let total = 0;
-    let count = 0;
-    for (let index = range.start; index < range.end; index += 1) {
-      if (!this.alive[index]) continue;
-      total += this.stamina[index];
-      count += 1;
-    }
-    return count > 0 ? total / count : 0;
-  }
-
   aliveCount(schoolIndex) {
     return this._activeSchoolCount(schoolIndex);
   }
@@ -1335,7 +1340,6 @@ export class ExperimentSimulation {
       ],
       panic: this.panic[index],
       energy: this.energy[index],
-      stamina: this.stamina[index],
       locomotionState: LOCOMOTION_LABEL[this.locomotionStates[index]],
     };
   }
@@ -1463,9 +1467,11 @@ export class ExperimentSimulation {
         cohesionRadius:
           this.derived.schools[index].cohesionRadius,
         detectionLength: this.derived.schools[index].detectionLength,
+        burstRadius:
+          this.derived.schools[index].detectionLength *
+          this.config.relations.burstRadiusFactor,
         measuredNeighbors: this.averageNeighbors(index),
         averageEnergy: this.averageEnergy(index),
-        averageStamina: this.averageStamina(index),
         deaths: { ...this.deathCounts[index] },
       })),
       relationMatrix: this.relationMatrix,

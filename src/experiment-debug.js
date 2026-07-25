@@ -62,7 +62,7 @@ const PROJECTS = {
   ecology: {
     eyebrow: 'SUB-EXPERIMENT 02',
     title: '生态淘汰',
-    description: '可耗竭浮游、真实饥饿与有限耐力捕食；仅剩一个种群时结算。',
+    description: '可耗竭浮游、真实饥饿与两层捕食力；仅剩一个种群时结算。',
     dashboard: 'ECOLOGY LEDGER',
   },
 };
@@ -663,7 +663,7 @@ export function createExperimentDebug({
       .filter(Boolean)
       .join(' · ');
     roleState.derived =
-      `size ${school.size.toFixed(2)} · r ${school.neighborRadius.toFixed(3)}`;
+      `size ${school.size.toFixed(2)} · hunt ${school.detectionLength.toFixed(3)} · burst ${school.burstRadius.toFixed(3)}`;
     boidState.separationRadius =
       school.separationRadius.toFixed(3);
     boidState.alignmentRadius =
@@ -711,7 +711,7 @@ export function createExperimentDebug({
       .map((item) => {
         const ecology =
           metrics.project === 'ecology'
-            ? ` E=${(item.averageEnergy * 100).toFixed(0)}% S=${(item.averageStamina * 100).toFixed(0)}% dead=${item.deaths.captured}/${item.deaths.starved}`
+            ? ` E=${(item.averageEnergy * 100).toFixed(0)}% dead=${item.deaths.captured}/${item.deaths.starved}`
             : '';
         return `${item.name} ${item.alive}/${item.target} size=${item.size.toFixed(2)} r=${item.neighborRadius.toFixed(3)}${ecology}`;
       })
