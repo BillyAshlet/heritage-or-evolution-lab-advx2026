@@ -120,6 +120,123 @@
   to   { --vo-sweep: 360deg; }
 }
 
+/* ── Ring wipe transition (era changes) ───────────────────────── */
+/* Composite reveal used for Begin and verdict→next-level transitions.
+   The new screen renders instantly underneath; two curtains carrying a
+   snapshot of the OUTGOING screen animate away in sync (same duration,
+   ease-in-out quad) — old turns into new directly, no blank frame:
+     .vo-wipe-ring — thick annulus cut out of the wrapper by a static
+       radial mask, centered on (--vo-wipe-cx, --vo-wipe-cy); the inner
+       .vo-wipe-sweep layer is erased by a conic clock sweep.
+       CW = forward, CCW = back.
+     .vo-wipe-flat — inner disc + everything outside the annulus
+       (inverted radial mask); erased by a horizontal clip-path wipe.
+       Right→left = forward, left→right = back.
+   The two masks overlap by 2px at both annulus edges so no hairline
+   seam opens between the curtains. */
+
+#visitor-overlay {
+  --vo-wipe-cx: 50vw;    /* wipe circle center — mid-screen, matches the */
+  --vo-wipe-cy: 50vh;    /* title hero / yellow ring column              */
+  --vo-wipe-r1: 130px;   /* annulus inner radius */
+  --vo-wipe-r2: 380px;   /* annulus outer radius */
+  --vo-wipe-dur: 0.65s;
+  --vo-iris-dur: 0.8s;   /* iris hole-open reveal (cutscene → tuning) */
+  --vo-quad: cubic-bezier(0.45, 0, 0.55, 1);  /* ease-in-out quad */
+}
+
+.vo-wipe-ring {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 280;
+  mask: radial-gradient(
+    circle at var(--vo-wipe-cx) var(--vo-wipe-cy),
+    transparent calc(var(--vo-wipe-r1) - 1px),
+    black var(--vo-wipe-r1),
+    black var(--vo-wipe-r2),
+    transparent calc(var(--vo-wipe-r2) + 1px)
+  );
+}
+.vo-wipe-sweep {
+  position: absolute;
+  inset: 0;
+  background: var(--v-bg);   /* fallback when there is no snapshot */
+}
+.vo-wipe-sweep--cw {
+  --vo-sweep: 0deg;
+  mask: conic-gradient(
+    from -90deg at var(--vo-wipe-cx) var(--vo-wipe-cy),
+    transparent 0deg, transparent var(--vo-sweep),
+    black var(--vo-sweep), black 360deg
+  );
+  animation: vo-sweep-out var(--vo-wipe-dur) var(--vo-quad) forwards;
+}
+.vo-wipe-sweep--ccw {
+  --vo-sweep: 0deg;
+  mask: conic-gradient(
+    from -90deg at var(--vo-wipe-cx) var(--vo-wipe-cy),
+    black 0deg, black calc(360deg - var(--vo-sweep)),
+    transparent calc(360deg - var(--vo-sweep)), transparent 360deg
+  );
+  animation: vo-sweep-out var(--vo-wipe-dur) var(--vo-quad) forwards;
+}
+
+.vo-wipe-flat {
+  position: fixed;
+  inset: 0;
+  background: var(--v-bg);   /* fallback when there is no snapshot */
+  pointer-events: none;
+  z-index: 280;
+  mask: radial-gradient(
+    circle at var(--vo-wipe-cx) var(--vo-wipe-cy),
+    black calc(var(--vo-wipe-r1) + 2px),
+    transparent calc(var(--vo-wipe-r1) + 3px),
+    transparent calc(var(--vo-wipe-r2) - 3px),
+    black calc(var(--vo-wipe-r2) - 2px)
+  );
+}
+.vo-wipe-flat--fwd  { animation: vo-wipe-fwd  var(--vo-wipe-dur) var(--vo-quad) forwards; }
+.vo-wipe-flat--back { animation: vo-wipe-back var(--vo-wipe-dur) var(--vo-quad) forwards; }
+
+@keyframes vo-wipe-fwd {   /* reveal frontier travels right → left */
+  from { clip-path: inset(0 0 0 0); }
+  to   { clip-path: inset(0 100% 0 0); }
+}
+@keyframes vo-wipe-back {  /* reveal frontier travels left → right */
+  from { clip-path: inset(0 0 0 0); }
+  to   { clip-path: inset(0 0 0 100%); }
+}
+
+/* Iris reveal (cutscene → tuning): a hole opens at the wipe center and
+   grows with quadratic easing until the outgoing snapshot is gone.
+   75vmax comfortably clears the screen's half-diagonal at any ratio. */
+@property --vo-iris {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+.vo-iris-wipe {
+  position: fixed;
+  inset: 0;
+  background: var(--v-bg);   /* fallback when there is no snapshot */
+  pointer-events: none;
+  z-index: 280;
+  --vo-iris: 0px;
+  mask: radial-gradient(
+    circle at var(--vo-wipe-cx) var(--vo-wipe-cy),
+    transparent calc(var(--vo-iris) - 1px),
+    black var(--vo-iris)
+  );
+  animation: vo-iris-open var(--vo-iris-dur) var(--vo-quad) forwards;
+}
+
+@keyframes vo-iris-open {
+  from { --vo-iris: 0px; }
+  to   { --vo-iris: 75vmax; }
+}
+
 /* ── Overlay container ────────────────────────────────────────────────── */
 #visitor-overlay {
   position: fixed;
@@ -252,63 +369,47 @@
   font-variation-settings: 'wght' 200;
 }
 
-/* Three-column layout: left item | ring+start | right items */
-.vo-title__nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(1.5rem, 4vw, 4rem);
+/* Interactive boid flock layer behind the hero */
+.vo-title__fish {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  max-width: 900px;
-}
-.vo-title__side {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  min-width: 0;
-}
-.vo-title__side--left  { align-items: flex-end;   text-align: right; }
-.vo-title__side--right { align-items: flex-start; text-align: left;  }
-
-/* Title-nav buttons share the variable font so proximity weight works on them */
-.vo-title__nav .vo-btn {
-  font-family: 'Roboto Flex', sans-serif;
-  font-variation-settings: 'wght' 350;
-  font-size: 0.82rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-.vo-title__nav .vo-btn--ghost {
-  border-color: rgba(221, 216, 204, 0.18);
-  background: rgba(15, 14, 12, 0.25);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  min-width: 9.5rem;
-  justify-content: center;
-  transition: opacity 120ms ease, background 200ms ease,
-              border-color 200ms ease, transform 200ms ease;
-}
-.vo-title__nav .vo-btn--ghost:hover {
-  border-color: rgba(196, 137, 42, 0.55);
-  background: rgba(196, 137, 42, 0.08);
-  transform: translateY(-1px);
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
 }
 
-.vo-title__center {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.25rem;
+/* Portal — the ring IS the entrance: BEGIN sits at its center.
+   Nudged off-axis so hero + portal read as a diagonal, not a column. */
+.vo-title__portal {
+  appearance: none;
+  border: none;
+  background: none;
+  position: relative;
+  width: clamp(180px, 24vw, 300px);
+  aspect-ratio: 1;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transform: translateX(clamp(1.5rem, 5vw, 6rem));
 }
+/* Soft inner fill that wakes on hover */
+.vo-title__portal::before {
+  content: '';
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(196, 137, 42, 0.14), transparent 70%);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+.vo-title__portal:hover::before { opacity: 1; }
+.vo-title__portal:hover .vo-ring-arc   { opacity: 1; stroke-width: 1.1; }
+.vo-title__portal:hover .vo-ring-track { stroke: rgba(221, 216, 204, 0.35); }
 
-/* Ring SVG */
-.vo-title__ring-wrap {
-  width: clamp(140px, 20vw, 240px);
-  height: clamp(140px, 20vw, 240px);
-}
-.vo-title__ring {
+.vo-title__portal .vo-title__ring {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
@@ -317,6 +418,7 @@
   stroke: var(--v-border);
   stroke-width: 0.75;
   fill: none;
+  transition: stroke 250ms ease;
 }
 .vo-ring-arc {
   fill: none;
@@ -326,22 +428,74 @@
   opacity: 0.5;
   transform-origin: 100px 100px;
   animation: vo-ring-spin 24s linear infinite;
+  transition: opacity 250ms ease, stroke-width 250ms ease;
 }
 @keyframes vo-ring-spin {
   to { transform: rotate(-360deg); }
 }
 
 .vo-title__start {
-  font-size: clamp(0.78rem, 1.3vw, 0.9rem);
-  padding: 0.7rem 1.7rem;
-  box-shadow: 0 0 0 rgba(196, 137, 42, 0);
-  transition: opacity 120ms ease, box-shadow 250ms ease, transform 200ms ease;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Roboto Flex', sans-serif;
+  font-size: clamp(0.95rem, 1.6vw, 1.25rem);
+  letter-spacing: 0.34em;
+  padding-left: 0.34em;   /* recenter: tracking pads only the right side */
+  text-transform: uppercase;
+  font-variation-settings: 'wght' 550;
+  color: var(--v-accent);
+  text-shadow: 0 0 18px rgba(196, 137, 42, 0.4);
+  transition: text-shadow 250ms ease;
 }
-.vo-title__start:hover {
-  opacity: 1;
-  box-shadow: 0 0 28px rgba(196, 137, 42, 0.45);
-  transform: translateY(-1px);
+.vo-title__portal:hover .vo-title__start {
+  text-shadow: 0 0 28px rgba(196, 137, 42, 0.8);
 }
+
+/* Index menu — numbered captions anchored to the lower-left margin,
+   counterweight to the portal's rightward drift */
+.vo-title__menu {
+  position: absolute;
+  left: 8vw;
+  bottom: 9vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.05rem;
+  padding-left: 1.4rem;
+  border-left: 1px solid rgba(221, 216, 204, 0.22);
+  z-index: 1;
+}
+.vo-menu-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  font-family: 'Roboto Flex', sans-serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-variation-settings: 'wght' 350;
+  color: var(--v-text-dim);
+  cursor: pointer;
+  transition: color 200ms ease, transform 200ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.vo-menu-link__idx {
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  color: var(--v-accent);
+  opacity: 0.65;
+  font-variation-settings: 'wght' 300;
+  transition: opacity 200ms ease;
+}
+.vo-menu-link:hover { color: var(--v-text); transform: translateX(4px); }
+.vo-menu-link:hover .vo-menu-link__idx { opacity: 1; }
 
 /* ── SUBSCREEN base (settings, concept, credits) ──────────────────────── */
 .vo-subscreen {

@@ -4,6 +4,8 @@
 // verdicts and inheritance. This module owns only the title/menu, narrative
 // cutscenes and the final experience screen.
 
+import { mountTitleFish } from './title-fish.js';
+
 export const VISITOR_SCREEN = Object.freeze({
   HIDDEN: 'HIDDEN',
   TITLE: 'TITLE',
@@ -211,6 +213,78 @@ export function resolveVisitorLevelCopy(levels, index, language = 'zh') {
     story: localized?.story ?? level.story ?? '',
     cta: localized?.cta ?? 'Continue →',
   });
+}
+
+// Deep-clones a screen and freezes its live media into still frames, so the
+// clone can act as a curtain after the original is torn down.
+function snapshotScreen(el) {
+  if (!el) return null;
+  const clone = el.cloneNode(true);
+  const liveMedia = el.querySelectorAll('video, canvas');
+  const cloneMedia = clone.querySelectorAll('video, canvas');
+  liveMedia.forEach((src, index) => {
+    const cw = src.clientWidth || 1;
+    const ch = src.clientHeight || 1;
+    const frame = document.createElement('canvas');
+    frame.width = cw;
+    frame.height = ch;
+    frame.className = src.className; // inherit position/opacity CSS
+    try {
+      const vw = src.videoWidth || src.width || cw;
+      const vh = src.videoHeight || src.height || ch;
+      const scale = Math.max(cw / vw, ch / vh); // object-fit: cover
+      frame
+        .getContext('2d')
+        .drawImage(
+          src,
+          (cw - vw * scale) / 2,
+          (ch - vh * scale) / 2,
+          vw * scale,
+          vh * scale,
+        );
+    } catch {
+      /* tainted/blank source — keep the transparent frame */
+    }
+    cloneMedia[index]?.replaceWith(frame);
+  });
+  for (const span of clone.querySelectorAll('.vo-blur-word')) {
+    span.style.animation = 'none';
+    span.style.opacity = '1';
+  }
+  return clone;
+}
+
+// Composite reveal for era changes. Two curtains carrying a snapshot of the
+// OUTGOING screen sit above the freshly rendered one and animate away
+// together, so the swap reads old→new directly, never through a blank frame:
+//   · .vo-wipe-ring — thick annulus; its snapshot is eaten by a conic sweep
+//   · .vo-wipe-flat — inner disc + outside; eaten by a horizontal wipe
+// Geometry, duration and easing live in visitor.css (--vo-wipe-* vars).
+function runRingWipe(overlay, forward, snapFlat, snapRing) {
+  const flat = document.createElement('div');
+  flat.className = `vo-wipe-flat vo-wipe-flat--${forward ? 'fwd' : 'back'}`;
+  if (snapFlat) flat.appendChild(snapFlat);
+  const ring = document.createElement('div');
+  ring.className = 'vo-wipe-ring';
+  const sweep = document.createElement('div');
+  sweep.className = `vo-wipe-sweep vo-wipe-sweep--${forward ? 'cw' : 'ccw'}`;
+  if (snapRing) sweep.appendChild(snapRing);
+  ring.appendChild(sweep);
+  overlay.append(flat, ring);
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    flat.remove();
+    ring.remove();
+  };
+  // Snapshot descendants bubble their own animationend — only the flat
+  // curtain's clip-path animation counts. The timeout covers the case where
+  // a re-render nukes the curtains before animationend can fire.
+  flat.addEventListener('animationend', (event) => {
+    if (event.target === flat) done();
+  });
+  window.setTimeout(done, 1200);
 }
 
 function prefersReducedMotion() {
@@ -445,6 +519,7 @@ export function mountVisitorMode({
   let screen = VISITOR_SCREEN.HIDDEN;
   let cutsceneLevelIndex = 0;
   let effectCleanup = () => {};
+  let titleFishCleanup = () => {};
   let dismissTimer = 0;
   let disposed = false;
 
@@ -472,6 +547,9 @@ export function mountVisitorMode({
   const cleanupEffects = () => {
     effectCleanup();
     effectCleanup = () => {};
+    // The title flock owns a THREE renderer + rAF loop; leaking one per
+    // screen change would stack renderers behind every later screen.
+    titleFishCleanup();
     window.clearTimeout(dismissTimer);
     dismissTimer = 0;
   };
@@ -486,6 +564,7 @@ export function mountVisitorMode({
     overlay.innerHTML = `
       <div class="vo-screen vo-title ${titleMediaHtml ? 'vo-title--media' : 'vo-title--fallback'}">
         ${titleMediaHtml}
+        <canvas class="vo-title__fish" aria-hidden="true"></canvas>
         <div class="vo-title__lang" aria-label="${escapeHtml(t('language'))}">
           <button class="vo-btn vo-btn--${language === 'zh' ? 'active' : 'ghost'} vo-lang-btn" data-lang="zh" type="button">中</button>
           <button class="vo-btn vo-btn--${language === 'en' ? 'active' : 'ghost'} vo-lang-btn" data-lang="en" type="button">EN</button>
@@ -494,26 +573,40 @@ export function mountVisitorMode({
           <h1 class="vo-title__name" tabindex="-1" data-screen-title data-fx="letters" data-fx-dir="top" data-fx-delay="60" data-fx-from="100" data-fx-to="900">${escapeHtml(t('title'))}</h1>
           <p class="vo-title__sub" data-fx="letters" data-fx-delay="35" data-fx-from="200">${escapeHtml(t('subtitle'))}</p>
         </div>
-        <nav class="vo-title__nav" aria-label="${escapeHtml(t('title'))}">
-          <div class="vo-title__side vo-title__side--left">
-            <button class="vo-btn vo-btn--ghost" data-action="settings" data-fx="letters" type="button">${escapeHtml(t('settings'))}</button>
-          </div>
-          <div class="vo-title__center">
-            <div class="vo-title__ring-wrap" aria-hidden="true">
-              <svg class="vo-title__ring" viewBox="0 0 200 200" fill="none">
-                <circle class="vo-ring-track" cx="100" cy="100" r="85"></circle>
-                <circle class="vo-ring-arc" cx="100" cy="100" r="85" stroke-dasharray="${arc} ${gap}"></circle>
-              </svg>
-            </div>
-            <button class="vo-btn vo-btn--primary vo-title__start" data-action="start" data-fx="letters" type="button">${escapeHtml(t('start'))}</button>
-          </div>
-          <div class="vo-title__side vo-title__side--right">
-            <button class="vo-btn vo-btn--ghost" data-action="concept" data-fx="letters" type="button">${escapeHtml(t('concept'))}</button>
-            <button class="vo-btn vo-btn--ghost" data-action="credits" data-fx="letters" type="button">${escapeHtml(t('credits'))}</button>
-          </div>
+        <button class="vo-title__portal" data-action="start" type="button">
+          <svg class="vo-title__ring" viewBox="0 0 200 200" fill="none" aria-hidden="true">
+            <circle class="vo-ring-track" cx="100" cy="100" r="85"></circle>
+            <circle class="vo-ring-arc" cx="100" cy="100" r="85" stroke-dasharray="${arc} ${gap}"></circle>
+          </svg>
+          <span class="vo-title__start" data-fx="letters">${escapeHtml(t('start'))}</span>
+        </button>
+        <nav class="vo-title__menu" aria-label="${escapeHtml(t('title'))}">
+          <button class="vo-menu-link" data-action="concept" type="button">
+            <span class="vo-menu-link__idx">01</span><span data-fx="letters">${escapeHtml(t('concept'))}</span>
+          </button>
+          <button class="vo-menu-link" data-action="credits" type="button">
+            <span class="vo-menu-link__idx">02</span><span data-fx="letters">${escapeHtml(t('credits'))}</span>
+          </button>
+          <button class="vo-menu-link" data-action="settings" type="button">
+            <span class="vo-menu-link__idx">03</span><span data-fx="letters">${escapeHtml(t('settings'))}</span>
+          </button>
         </nav>
       </div>
     `;
+    // Interactive boid flock on the title screen — the pointer attracts it.
+    // Disposed via titleFishCleanup on every screen change.
+    titleFishCleanup();
+    const fishCanvas = overlay.querySelector('.vo-title__fish');
+    if (fishCanvas) {
+      const handle = mountTitleFish(fishCanvas, {
+        count: 16,
+        cohesionRadius: FX_RING_RADIUS,
+      });
+      titleFishCleanup = () => {
+        handle?.dispose?.();
+        titleFishCleanup = () => {};
+      };
+    }
   };
 
   const renderSettings = () => {
@@ -616,6 +709,13 @@ export function mountVisitorMode({
 
   const render = (direction = null) => {
     if (disposed || screen === VISITOR_SCREEN.HIDDEN) return;
+    // Snapshot the outgoing screen BEFORE it is torn down, so a ring wipe
+    // can carry it as a curtain over the incoming one (no blank frame).
+    const outgoing =
+      direction && direction.startsWith('ring') && !prefersReducedMotion()
+        ? snapshotScreen(overlay.firstElementChild)
+        : null;
+    const outgoingRing = outgoing ? snapshotScreen(overlay.firstElementChild) : null;
     cleanupEffects();
     overlay.classList.remove('vo-shell--dismissing');
     overlay.hidden = false;
@@ -650,7 +750,10 @@ export function mountVisitorMode({
     wireMediaFallback(overlay);
     effectCleanup = applyTextEffects(overlay);
     const content = overlay.firstElementChild;
-    if (
+    if (outgoing) {
+      // Era change: composite ring wipe instead of the plain conic sweep.
+      runRingWipe(overlay, !direction.includes('ccw'), outgoing, outgoingRing);
+    } else if (
       content &&
       direction &&
       SWEEP_SCREENS.has(screen) &&
@@ -709,7 +812,8 @@ export function mountVisitorMode({
     setScreen(VISITOR_SCREEN.TITLE, direction);
   };
 
-  const showCutscene = (levelIndex, direction = 'cw') => {
+  // Entering a generation is an era change — default to the ring wipe.
+  const showCutscene = (levelIndex, direction = 'ring-cw') => {
     cutsceneLevelIndex = normalizeLevelIndex(
       levelIndex,
       Math.max(1, levels.length),
@@ -725,7 +829,8 @@ export function mountVisitorMode({
     if (action === 'start') {
       try {
         onBeginExperience();
-        showCutscene(0, 'cw');
+        // Era change → composite ring wipe, not the plain conic sweep.
+        showCutscene(0, 'ring-cw');
       } catch (error) {
         console.error('[visitor shell] Failed to begin experience.', error);
       }
