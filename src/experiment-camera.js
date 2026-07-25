@@ -2,6 +2,23 @@ import * as THREE from 'three';
 
 const FORWARD = new THREE.Vector3(0, 0, 1);
 
+export function resolveDoubleClickTarget(
+  pickedHit,
+  lastClickHit,
+  elapsedMs,
+  maxAgeMs = 500
+) {
+  if (pickedHit >= 0) return pickedHit;
+  if (
+    lastClickHit >= 0 &&
+    elapsedMs >= 0 &&
+    elapsedMs <= maxAgeMs
+  ) {
+    return lastClickHit;
+  }
+  return -1;
+}
+
 export class ExperimentCameraController {
   constructor({ camera, renderer, presentation, simulation }) {
     this.camera = camera;
@@ -14,6 +31,8 @@ export class ExperimentCameraController {
     this.pitch = 0;
     this.dragPointer = null;
     this.dragStart = null;
+    this.lastClickHit = -1;
+    this.lastClickAt = -Infinity;
     this.savedPose = null;
     this.selectionSavedPose = null;
     this.raycaster = new THREE.Raycaster();
@@ -110,7 +129,12 @@ export class ExperimentCameraController {
     });
     canvas.addEventListener('dblclick', (event) => {
       event.preventDefault();
-      const hit = this._pick(event);
+      const pickedHit = this._pick(event);
+      const hit = resolveDoubleClickTarget(
+        pickedHit,
+        this.lastClickHit,
+        performance.now() - this.lastClickAt
+      );
       if (hit >= 0) this.enterFirstPerson(hit);
       else this.exitFirstPerson();
     });
@@ -144,6 +168,8 @@ export class ExperimentCameraController {
 
   _handleClick(event) {
     const hit = this._pick(event);
+    this.lastClickHit = hit;
+    this.lastClickAt = performance.now();
     if (hit < 0) {
       this.clearSelection();
       return;

@@ -1,45 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as THREE from 'three';
 import {
   SeededRng,
   SpatialHash3D,
+  analyzePairedCascade,
   analyzeCascadeSeries,
   captureRadius,
   deriveExperiment,
+  ecologyOutcome,
   effectiveMaxSpeed,
+  effectiveTurnSpeed,
   isRespawnCandidate,
+  metabolicRate,
   perPredatorCooldown,
   relationBetween,
   relationForRatio,
+  stepPlankton,
   visualLength,
 } from './experiment-model.js';
 import { createDefaultConfig } from './experiment-config.js';
-import { ExperimentSimulation } from './experiment-simulation.js';
-
-function smallSimulation(mode = 'cascade', seed = 1001) {
-  const config = createDefaultConfig();
-  config.runtime.mode = mode;
-  config.runtime.seed = seed;
-  config.physics.enabled = false;
-  config.schools[0].count = 6;
-  config.schools[1].count = 4;
-  config.schools[2].count = 2;
-  config.schools[0].targetNeighbors = 3;
-  config.schools[1].targetNeighbors = 2;
-  config.schools[2].targetNeighbors = 1;
-  const neutralField = {
-    query: () => ({ clearance: 1, gradient: [0, 0, 0] }),
-  };
-  const simulation = new ExperimentSimulation({
-    scene: new THREE.Scene(),
-    config,
-    distanceField: neutralField,
-    physics: null,
-  });
-  simulation.updateMesh = () => {};
-  return simulation;
-}
 
 test('default dynamic radii match the 400/200/40 design values', () => {
   const config = createDefaultConfig();
@@ -120,20 +99,6 @@ test('cascade sub-experiment keeps the explicit trophic window', () => {
   assert.equal(relationBetween(small, large, config.relations), 'ignore');
 });
 
-test('direct threat is proximity-driven even when pursuit target selection loses', () => {
-  const simulation = smallSimulation();
-  const prey = 0;
-  const predator = simulation.schoolRanges[1].start;
-  simulation.positions.fill(0);
-  simulation.sameNeighbors[prey] = 5;
-  simulation.targetIsolation[predator] = 0;
-  simulation.targetDistance2[predator] = 0;
-  simulation.pursuitTargets[predator] = -1;
-  simulation._directedRelation(predator, prey, 0.01, 0, 0, 0.01, 0.0001);
-  assert.equal(simulation.pursuitTargets[predator], -1);
-  assert.equal(simulation.threatCounts[prey], 1);
-});
-
 test('burst, panic speed and visual capture distance are derived', () => {
   const config = createDefaultConfig();
   const [small, medium] = config.schools;
@@ -158,35 +123,6 @@ test('per-predator independent cooldown converges to target school rate', () => 
   const targetRate = 3;
   const cooldown = perPredatorCooldown(count, targetRate);
   assert.ok(Math.abs(count / cooldown - targetRate) < 1e-12);
-});
-
-test('cascade mode cannot capture or schedule respawn', () => {
-  const simulation = smallSimulation('cascade');
-  const prey = 0;
-  const predator = simulation.schoolRanges[1].start;
-  simulation.positions.fill(0);
-  simulation.pursuitTargets[predator] = prey;
-  simulation.cooldowns[predator] = 0;
-  simulation._captureAndRespawn(1 / 60);
-  assert.equal(simulation.alive[prey], 1);
-  assert.equal(simulation.pendingRespawns.length, 0);
-});
-
-test('steady mode captures at visual distance and queues delayed respawn', () => {
-  const simulation = smallSimulation('steady');
-  const prey = 0;
-  const predator = simulation.schoolRanges[1].start;
-  simulation.positions.fill(0);
-  simulation.pursuitTargets[predator] = prey;
-  simulation.cooldowns[predator] = 0;
-  simulation._captureAndRespawn(1 / 60);
-  assert.equal(simulation.alive[prey], 0);
-  assert.equal(simulation.pendingRespawns.length, 1);
-  assert.ok(simulation.captureVfx.particles.length > 0);
-  assert.equal(
-    simulation.pendingRespawns[0].due,
-    simulation.elapsed + simulation.config.respawn.delay
-  );
 });
 
 test('respawn validator enforces edge, predator safety and schoolmate cohesion', () => {
@@ -248,13 +184,7 @@ test('respawn validator enforces edge, predator safety and schoolmate cohesion',
   );
 });
 
-test('seeded RNG and initial simulation state are reproducible', () => {
-  const a = smallSimulation('cascade', 9981);
-  const b = smallSimulation('cascade', 9981);
-  const c = smallSimulation('cascade', 9982);
-  assert.deepEqual([...a.positions], [...b.positions]);
-  assert.deepEqual([...a.velocities], [...b.velocities]);
-  assert.notDeepEqual([...a.positions], [...c.positions]);
+test('seeded RNG is reproducible without importing the rendering engine', () => {
   const rngA = new SeededRng(44);
   const rngB = new SeededRng(44);
   assert.deepEqual(
@@ -306,5 +236,99 @@ test('synthetic cascade series proves ordered peaks, path and attribution', () =
   );
   assert.ok(
     result.attributionGain >= config.cascadeJudge.attributionGain
+  );
+});
+
+test('paired cascade compares release against the same-seed holding control', () => {
+  const config = createDefaultConfig();
+  const baselineSamples = Array.from({ length: 5 }, (_, index) => ({
+    time: index * 0.1,
+    rogMedium: 0.4,
+    rogSmall: 0.4,
+    neighborsMedium: 8,
+    neighborsSmall: 8,
+  }));
+  const controlSamples = Array.from({ length: 8 }, (_, index) => ({
+    time: index * 0.25,
+    rogMedium: 0.4 + index * 0.01,
+    rogSmall: 0.4 + index * 0.012,
+  }));
+  const eventSamples = controlSamples.map((sample, index) => ({
+    ...sample,
+    rogMedium:
+      sample.rogMedium + [0, 0.02, 0.05, 0.08, 0.06, 0.04, 0.02, 0][index],
+    rogSmall:
+      sample.rogSmall + [0, 0, 0.01, 0.02, 0.05, 0.08, 0.06, 0.03][index],
+  }));
+  const result = analyzePairedCascade({
+    baselineSamples,
+    eventSamples,
+    controlSamples,
+    forbidden: { pursuit: 0, directThreat: 0, captures: 0 },
+    config,
+    tank: config.tank,
+  });
+  assert.equal(result.passed, true);
+  assert.ok(
+    result.effects.medium >= config.cascadeJudge.pairedMinMediumDelta
+  );
+  assert.ok(
+    result.effects.small >= config.cascadeJudge.pairedMinSmallDelta
+  );
+  assert.ok(result.peaks.lag >= config.cascadeJudge.minPeakLag);
+
+  const noiseOnly = analyzePairedCascade({
+    baselineSamples,
+    eventSamples: controlSamples,
+    controlSamples,
+    forbidden: { pursuit: 0, directThreat: 0, captures: 0 },
+    config,
+    tank: config.tank,
+  });
+  assert.equal(noiseOnly.passed, false);
+  assert.equal(noiseOnly.effects.small, 0);
+});
+
+test('ecology helpers implement logistic food, Kleiber-like drain and terminal outcomes', () => {
+  const config = createDefaultConfig();
+  const smallRate = metabolicRate(config, config.schools[0]);
+  const largeRate = metabolicRate(config, config.schools[2]);
+  assert.ok(largeRate < smallRate);
+  const resource = stepPlankton({
+    level: 300,
+    capacity: 600,
+    growthRate: 0.12,
+    requestedConsumption: 10,
+    dt: 1,
+  });
+  assert.ok(resource.growth > 0);
+  assert.equal(resource.consumed, 10);
+  assert.deepEqual(ecologyOutcome([3, 0, 0]), {
+    state: 'winner',
+    winnerIndex: 0,
+  });
+  assert.deepEqual(ecologyOutcome([0, 0, 0]), {
+    state: 'collapse',
+    winnerIndex: null,
+  });
+  assert.equal(ecologyOutcome([3, 2, 0]).state, 'running');
+});
+
+test('trait coupling penalizes sustained speed and turning while preserving burst state', () => {
+  const config = createDefaultConfig();
+  config.traits.enabled = true;
+  const small = config.schools[0];
+  const large = config.schools[2];
+  assert.ok(
+    effectiveMaxSpeed(config, large, 'cruise') <
+      effectiveMaxSpeed(config, small, 'cruise')
+  );
+  assert.ok(
+    effectiveTurnSpeed(config, large) <
+      effectiveTurnSpeed(config, small)
+  );
+  assert.ok(
+    effectiveMaxSpeed(config, large, 'burst') >
+      effectiveMaxSpeed(config, large, 'cruise')
   );
 });

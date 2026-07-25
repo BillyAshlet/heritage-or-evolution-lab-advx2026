@@ -3,21 +3,42 @@ import {
   RelationMatrix,
   SeededRng,
   SpatialHash3D,
+  analyzePairedCascade,
   captureRadius,
   deriveExperiment,
+  ecologyOutcome,
   effectiveMaxSpeed,
+  effectiveTurnSpeed,
   isRespawnCandidate,
+  metabolicRate,
   modeFlags,
   perPredatorCooldown,
   relationBetween,
+  stepPlankton,
+  sustainedSpeedScale,
   tankVolume,
 } from './experiment-model.js';
 import { sceneClearance, tankWallClearance } from './distance-field.js';
 import { CascadeProbe } from './cascade-probe.js';
 import { CaptureVfx } from './capture-vfx.js';
+import { deepClone } from './experiment-config.js';
 
 const EPSILON = 1e-8;
 const FORWARD = new THREE.Vector3(0, 0, 1);
+const LOCOMOTION = Object.freeze({
+  CRUISE: 0,
+  STALK: 1,
+  BURST: 2,
+  EVADE: 3,
+  RECOVER: 4,
+});
+const LOCOMOTION_LABEL = Object.freeze([
+  'cruise',
+  'stalk',
+  'burst',
+  'evade',
+  'recover',
+]);
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -60,6 +81,7 @@ export class ExperimentSimulation {
     this.batchRunning = false;
     this.lastBatch = null;
     this.captureVfx = null;
+    this.planktonMesh = null;
     this.metricsState = {
       frameMs: 0,
       fps: 0,
@@ -77,6 +99,12 @@ export class ExperimentSimulation {
       this.mesh.geometry.dispose();
       this.mesh.material.dispose();
       this.mesh = null;
+    }
+    if (this.planktonMesh) {
+      this.planktonMesh.removeFromParent();
+      this.planktonMesh.geometry.dispose();
+      this.planktonMesh.material.dispose();
+      this.planktonMesh = null;
     }
     this.captureVfx?.dispose();
     this.captureVfx = null;
@@ -98,6 +126,9 @@ export class ExperimentSimulation {
     this.schoolIds = new Uint16Array(this.count);
     this.alive = new Uint8Array(this.count);
     this.panic = new Float32Array(this.count);
+    this.energy = new Float32Array(this.count);
+    this.stamina = new Float32Array(this.count);
+    this.locomotionStates = new Uint8Array(this.count);
     this.cooldowns = new Float32Array(this.count);
     this.wanderPhases = new Float32Array(this.count);
     this.sameNeighbors = new Uint16Array(this.count);
@@ -105,6 +136,8 @@ export class ExperimentSimulation {
     this.alignmentCounts = new Uint16Array(this.count);
     this.threatCounts = new Uint16Array(this.count);
     this.pursuitTargets = new Int32Array(this.count);
+    this.lastPursuitTargets = new Int32Array(this.count);
+    this.chaseStartTimes = new Float64Array(this.count);
     this.targetIsolation = new Uint16Array(this.count);
     this.targetDistance2 = new Float32Array(this.count);
     this.schoolCenters = new Float32Array(config.schools.length * 3);
@@ -128,11 +161,16 @@ export class ExperimentSimulation {
       );
     }
     this._buildMesh();
+    this._buildPlanktonMesh();
     this.probe = new CascadeProbe(this);
     this.reset(config.runtime.seed);
   }
 
   _buildMesh() {
+    if (!this.scene?.add) {
+      this.mesh = null;
+      return;
+    }
     const radialSegments = Math.max(
       3,
       Math.round(this.config.visual.radialSegments)
@@ -163,6 +201,50 @@ export class ExperimentSimulation {
     this.scene.add(this.mesh);
   }
 
+  _buildPlanktonMesh() {
+    if (!this.scene?.add || this.config.plankton.visualCount <= 0) {
+      this.planktonMesh = null;
+      return;
+    }
+    const count = Math.max(
+      0,
+      Math.round(this.config.plankton.visualCount)
+    );
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const rng = new SeededRng(
+      (Number(this.config.runtime.seed) ^ 0x9e3779b9) >>> 0
+    );
+    const margin = this.config.tank.wallMargin;
+    const half = [
+      Math.max(0, this.config.tank.width / 2 - margin),
+      Math.max(0, this.config.tank.height / 2 - margin),
+      Math.max(0, this.config.tank.depth / 2 - margin),
+    ];
+    for (let index = 0; index < count; index += 1) {
+      const offset = index * 3;
+      positions[offset] = rng.range(-half[0], half[0]);
+      positions[offset + 1] = rng.range(-half[1], half[1]);
+      positions[offset + 2] = rng.range(-half[2], half[2]);
+    }
+    geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(positions, 3)
+    );
+    const material = new THREE.PointsMaterial({
+      color: this.config.plankton.color,
+      size: this.config.plankton.pointSize,
+      transparent: true,
+      opacity: this.config.plankton.opacity,
+      depthWrite: false,
+      sizeAttenuation: true,
+    });
+    this.planktonMesh = new THREE.Points(geometry, material);
+    this.planktonMesh.name = 'experiment-plankton';
+    this.planktonMesh.frustumCulled = false;
+    this.scene.add(this.planktonMesh);
+  }
+
   reset(seed = this.config.runtime.seed) {
     this.rng = new SeededRng(seed);
     this.seed = Number(seed);
@@ -183,10 +265,31 @@ export class ExperimentSimulation {
     this.metricsState.captures = 0;
     this.metricsState.respawned = 0;
     this.metricsState.dynamicContacts = 0;
+    this.chaseTelemetry = new Map();
+    this.deathCounts = this.config.schools.map(() => ({
+      captured: 0,
+      starved: 0,
+    }));
+    this.planktonLevel =
+      this.config.plankton.capacity *
+      this.config.plankton.initialFraction;
+    this.planktonConsumed = 0;
+    this.ecologyStatus = { state: 'running', winnerIndex: null };
     this.probe?.reset();
     this.captureVfx?.reset();
     this.alive.fill(1);
     this.panic.fill(0);
+    this.energy.fill(
+      this.config.ecology.energyCapacity *
+        this.config.ecology.initialEnergyRatio
+    );
+    this.stamina.fill(1);
+    this.locomotionStates.fill(LOCOMOTION.CRUISE);
+    this.pursuitTargets.fill(-1);
+    this.targetIsolation.fill(65535);
+    this.targetDistance2.fill(Infinity);
+    this.lastPursuitTargets.fill(-1);
+    this.chaseStartTimes.fill(-1);
     this.hiddenFish = -1;
 
     for (
@@ -277,6 +380,7 @@ export class ExperimentSimulation {
     }
     this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
     this._syncHoldingVisual();
+    this._syncPlanktonVisual();
     this.updateMesh();
     return this;
   }
@@ -303,6 +407,30 @@ export class ExperimentSimulation {
       this.mesh.instanceColor.needsUpdate = true;
     }
     this._syncHoldingVisual();
+    this._syncPlanktonVisual();
+  }
+
+  _syncPlanktonVisual() {
+    if (!this.planktonMesh) return;
+    const visible =
+      this.config.runtime.mode === 'ecology' &&
+      this.config.plankton.enabled;
+    this.planktonMesh.visible = visible;
+    const fraction =
+      this.config.plankton.capacity > EPSILON
+        ? clamp(
+            this.planktonLevel / this.config.plankton.capacity,
+            0,
+            1
+          )
+        : 0;
+    const visibleCount = visible
+      ? Math.round(this.config.plankton.visualCount * fraction)
+      : 0;
+    this.planktonMesh.geometry.setDrawRange(0, visibleCount);
+    this.planktonMesh.material.size = this.config.plankton.pointSize;
+    this.planktonMesh.material.opacity = this.config.plankton.opacity;
+    this.planktonMesh.material.color.set(this.config.plankton.color);
   }
 
   holdingBounds() {
@@ -378,6 +506,83 @@ export class ExperimentSimulation {
     this.targetDistance2.fill(Infinity);
     this.metricsState.pairCount = 0;
     this.metricsState.dynamicContacts = 0;
+  }
+
+  _telemetryFor(actorSchool, targetSchool) {
+    const key = `${actorSchool}>${targetSchool}`;
+    let record = this.chaseTelemetry.get(key);
+    if (!record) {
+      record = {
+        starts: 0,
+        pursuitFrames: 0,
+        captures: 0,
+        abandoned: 0,
+        active: 0,
+        completedDuration: 0,
+        capturedDuration: 0,
+        burstSeconds: 0,
+      };
+      this.chaseTelemetry.set(key, record);
+    }
+    return record;
+  }
+
+  _finishChase(predator, prey, captured) {
+    if (prey < 0 || this.chaseStartTimes[predator] < 0) return;
+    const actorSchool = this.schoolIds[predator];
+    const targetSchool = this.schoolIds[prey];
+    const record = this._telemetryFor(actorSchool, targetSchool);
+    const duration = Math.max(
+      0,
+      this.elapsed - this.chaseStartTimes[predator]
+    );
+    record.completedDuration += duration;
+    if (captured) {
+      record.captures += 1;
+      record.capturedDuration += duration;
+    } else {
+      record.abandoned += 1;
+    }
+    this.lastPursuitTargets[predator] = -1;
+    this.chaseStartTimes[predator] = -1;
+  }
+
+  _updateChaseTelemetry(dt) {
+    for (const record of this.chaseTelemetry.values()) record.active = 0;
+    for (let predator = 0; predator < this.count; predator += 1) {
+      if (!this.alive[predator]) {
+        this._finishChase(
+          predator,
+          this.lastPursuitTargets[predator],
+          false
+        );
+        continue;
+      }
+      const next = this.pursuitTargets[predator];
+      const previous = this.lastPursuitTargets[predator];
+      if (next !== previous) {
+        this._finishChase(predator, previous, false);
+        if (next >= 0 && this.alive[next]) {
+          const actorSchool = this.schoolIds[predator];
+          const targetSchool = this.schoolIds[next];
+          const record = this._telemetryFor(actorSchool, targetSchool);
+          record.starts += 1;
+          this.lastPursuitTargets[predator] = next;
+          this.chaseStartTimes[predator] = this.elapsed;
+        }
+      }
+      const activeTarget = this.lastPursuitTargets[predator];
+      if (activeTarget < 0 || !this.alive[activeTarget]) continue;
+      const record = this._telemetryFor(
+        this.schoolIds[predator],
+        this.schoolIds[activeTarget]
+      );
+      record.active += 1;
+      record.pursuitFrames += 1;
+      if (this.locomotionStates[predator] === LOCOMOTION.BURST) {
+        record.burstSeconds += dt;
+      }
+    }
   }
 
   _sameSchoolPair(i, j, dx, dy, dz, distance2) {
@@ -590,6 +795,69 @@ export class ExperimentSimulation {
     return force;
   }
 
+  _movementState(index, target, threatened, dt) {
+    if (!this.config.traits.enabled) {
+      const state = target >= 0 ? 'pursuit' : threatened ? 'evade' : 'cruise';
+      this.locomotionStates[index] =
+        target >= 0
+          ? LOCOMOTION.BURST
+          : threatened
+            ? LOCOMOTION.EVADE
+            : LOCOMOTION.CRUISE;
+      this.stamina[index] = 1;
+      return state;
+    }
+    let state = 'cruise';
+    let code = LOCOMOTION.CRUISE;
+    if (threatened) {
+      state = 'evade';
+      code = LOCOMOTION.EVADE;
+    } else if (target >= 0 && this.alive[target]) {
+      const current = this.locomotionStates[index];
+      const stamina = this.stamina[index];
+      const recovering =
+        current === LOCOMOTION.RECOVER &&
+        stamina < this.config.traits.burstStartStamina;
+      if (
+        recovering ||
+        stamina <= this.config.traits.burstStopStamina
+      ) {
+        state = 'recover';
+        code = LOCOMOTION.RECOVER;
+      } else {
+        const schoolIndex = this.schoolIds[index];
+        const ambushDistance =
+          this.derived.schools[schoolIndex].detectionLength *
+          this.config.traits.ambushDistanceFactor;
+        const distance = Math.sqrt(
+          Math.max(0, this.targetDistance2[index])
+        );
+        if (distance > ambushDistance) {
+          state = 'stalk';
+          code = LOCOMOTION.STALK;
+        } else {
+          state = 'burst';
+          code = LOCOMOTION.BURST;
+        }
+      }
+    }
+    if (code === LOCOMOTION.BURST) {
+      this.stamina[index] = Math.max(
+        0,
+        this.stamina[index] -
+          this.config.traits.staminaDrainRate * dt
+      );
+    } else {
+      this.stamina[index] = Math.min(
+        1,
+        this.stamina[index] +
+          this.config.traits.staminaRecoveryRate * dt
+      );
+    }
+    this.locomotionStates[index] = code;
+    return state;
+  }
+
   _steerFish(index, dt) {
     if (!this.alive[index]) return;
     const offset = index * 3;
@@ -784,20 +1052,28 @@ export class ExperimentSimulation {
       1
     );
     const angle = Math.acos(dot);
+    const turnSpeed = effectiveTurnSpeed(this.config, school);
     const turnAlpha =
       angle <= EPSILON
         ? 1
-        : Math.min(1, (school.turnSpeed * dt) / angle);
+        : Math.min(1, (turnSpeed * dt) / angle);
     const turned = normalize3(
       oldDirection[0] * (1 - turnAlpha) + nextDirection[0] * turnAlpha,
       oldDirection[1] * (1 - turnAlpha) + nextDirection[1] * turnAlpha,
       oldDirection[2] * (1 - turnAlpha) + nextDirection[2] * turnAlpha
     );
     let desiredSpeed = nextDirection[3];
-    if (desiredSpeed < school.cruiseSpeed) {
-      desiredSpeed = approach(desiredSpeed, school.cruiseSpeed, 3, dt);
+    const cruiseSpeed =
+      school.cruiseSpeed * sustainedSpeedScale(this.config, school);
+    if (desiredSpeed < cruiseSpeed) {
+      desiredSpeed = approach(desiredSpeed, cruiseSpeed, 3, dt);
     }
-    const state = target >= 0 ? 'pursuit' : threatened ? 'evade' : 'cruise';
+    const state = this._movementState(
+      index,
+      target,
+      threatened,
+      dt
+    );
     const maxSpeed = effectiveMaxSpeed(this.config, school, state);
     desiredSpeed = Math.min(maxSpeed, desiredSpeed);
     nextVx = turned[0] * desiredSpeed;
@@ -839,6 +1115,92 @@ export class ExperimentSimulation {
       count += this.alive[index];
     }
     return count;
+  }
+
+  _killFish(index, reason) {
+    if (!this.alive[index]) return false;
+    this.alive[index] = 0;
+    const schoolIndex = this.schoolIds[index];
+    if (reason === 'captured') {
+      this.deathCounts[schoolIndex].captured += 1;
+    } else if (reason === 'starved') {
+      this.deathCounts[schoolIndex].starved += 1;
+      if (this.config.ecology.starvationVfxEnabled) {
+        const offset = index * 3;
+        const position = new THREE.Vector3(
+          this.positions[offset],
+          this.positions[offset + 1],
+          this.positions[offset + 2]
+        );
+        this.captureVfx?.emit(
+          position,
+          new THREE.Vector3(0, 0, 0),
+          position
+        );
+      }
+    }
+    return true;
+  }
+
+  _updateEcology(dt) {
+    if (this.config.runtime.mode !== 'ecology') return;
+    const plankton = this.config.plankton;
+    const capacity = plankton.capacity;
+    const halfSaturation =
+      capacity * plankton.halfSaturationFraction;
+    const availability =
+      plankton.enabled && this.planktonLevel > 0
+        ? this.planktonLevel /
+          Math.max(EPSILON, this.planktonLevel + halfSaturation)
+        : 0;
+    let requestedConsumption = 0;
+    for (let index = 0; index < this.count; index += 1) {
+      if (!this.alive[index]) continue;
+      const school = this.config.schools[this.schoolIds[index]];
+      requestedConsumption +=
+        school.grazeRate *
+        plankton.maxIntakePerFish *
+        availability *
+        dt;
+    }
+    const resource = stepPlankton({
+      level: this.planktonLevel,
+      capacity,
+      growthRate: plankton.enabled ? plankton.growthRate : 0,
+      requestedConsumption,
+      dt,
+    });
+    this.planktonLevel = resource.level;
+    this.planktonConsumed += resource.consumed;
+    const starved = [];
+    for (let index = 0; index < this.count; index += 1) {
+      if (!this.alive[index]) continue;
+      const school = this.config.schools[this.schoolIds[index]];
+      const intake =
+        school.grazeRate *
+        plankton.maxIntakePerFish *
+        availability *
+        dt *
+        resource.fulfillment *
+        plankton.energyConversion;
+      const drain =
+        metabolicRate(
+          this.config,
+          school,
+          this.locomotionStates[index] === LOCOMOTION.BURST
+        ) * dt;
+      this.energy[index] = Math.min(
+        this.config.ecology.energyCapacity,
+        this.energy[index] + intake - drain
+      );
+      if (this.energy[index] <= 0) starved.push(index);
+    }
+    for (const index of starved) this._killFish(index, 'starved');
+    const aliveCounts = this.config.schools.map((_, schoolIndex) =>
+      this._activeSchoolCount(schoolIndex)
+    );
+    this.ecologyStatus = ecologyOutcome(aliveCounts);
+    this._syncPlanktonVisual();
   }
 
   _captureAndRespawn(dt) {
@@ -899,20 +1261,31 @@ export class ExperimentSimulation {
             this.positions[po + 2]
           )
         );
-        this.alive[prey] = 0;
+        this._finishChase(predator, prey, true);
+        this._killFish(prey, 'captured');
         this.metricsState.captures += 1;
+        if (this.config.runtime.mode === 'ecology') {
+          this.energy[predator] = Math.min(
+            this.config.ecology.energyCapacity,
+            this.energy[predator] +
+              this.config.ecology.captureEnergyPerSize *
+                this.config.schools[preySchool].size
+          );
+        }
         this.probe.addForbidden(
           'captures',
           predatorSchool,
           preySchool,
           1
         );
-        this.pendingRespawns.push({
-          index: prey,
-          schoolIndex: preySchool,
-          due: this.elapsed + this.config.respawn.delay,
-          nextTry: this.elapsed + this.config.respawn.delay,
-        });
+        if (flags.respawnEnabled) {
+          this.pendingRespawns.push({
+            index: prey,
+            schoolIndex: preySchool,
+            due: this.elapsed + this.config.respawn.delay,
+            nextTry: this.elapsed + this.config.respawn.delay,
+          });
+        }
         this.cooldowns[predator] = perPredatorCooldown(
           this._activeSchoolCount(predatorSchool),
           this.config.capture.targetCaptureRate
@@ -997,6 +1370,11 @@ export class ExperimentSimulation {
         direction[2] * school.cruiseSpeed
       );
       this.panic[index] = 0;
+      this.energy[index] =
+        this.config.ecology.energyCapacity *
+        this.config.ecology.initialEnergyRatio;
+      this.stamina[index] = 1;
+      this.locomotionStates[index] = LOCOMOTION.CRUISE;
       this.alive[index] = 1;
       this.metricsState.respawned += 1;
     }
@@ -1004,6 +1382,12 @@ export class ExperimentSimulation {
   }
 
   _advance(dt) {
+    if (
+      this.config.runtime.mode === 'ecology' &&
+      this.ecologyStatus.state !== 'running'
+    ) {
+      return;
+    }
     this.elapsed += dt;
     this.derived = deriveExperiment(this.config);
     this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
@@ -1040,10 +1424,12 @@ export class ExperimentSimulation {
     for (let index = 0; index < this.count; index += 1) {
       this._steerFish(index, dt);
     }
+    this._updateChaseTelemetry(dt);
     for (let index = 0; index < this.count; index += 1) {
       this._integrate(index, dt);
     }
     this._captureAndRespawn(dt);
+    this._updateEcology(dt);
     this.probe.sample(this.elapsed);
     if (!this.batchRunning) this.physics?.step(dt);
     this.updateMesh();
@@ -1127,6 +1513,32 @@ export class ExperimentSimulation {
     return count > 0 ? total / count : 0;
   }
 
+  averageEnergy(schoolIndex) {
+    const range = this.schoolRanges[schoolIndex];
+    let total = 0;
+    let count = 0;
+    for (let index = range.start; index < range.end; index += 1) {
+      if (!this.alive[index]) continue;
+      total +=
+        this.energy[index] /
+        Math.max(EPSILON, this.config.ecology.energyCapacity);
+      count += 1;
+    }
+    return count > 0 ? total / count : 0;
+  }
+
+  averageStamina(schoolIndex) {
+    const range = this.schoolRanges[schoolIndex];
+    let total = 0;
+    let count = 0;
+    for (let index = range.start; index < range.end; index += 1) {
+      if (!this.alive[index]) continue;
+      total += this.stamina[index];
+      count += 1;
+    }
+    return count > 0 ? total / count : 0;
+  }
+
   aliveCount(schoolIndex) {
     return this._activeSchoolCount(schoolIndex);
   }
@@ -1156,6 +1568,9 @@ export class ExperimentSimulation {
         this.velocities[offset + 2],
       ],
       panic: this.panic[index],
+      energy: this.energy[index],
+      stamina: this.stamina[index],
+      locomotionState: LOCOMOTION_LABEL[this.locomotionStates[index]],
     };
   }
 
@@ -1190,20 +1605,78 @@ export class ExperimentSimulation {
     for (let actor = 0; actor < this.config.schools.length; actor += 1) {
       for (let target = 0; target < this.config.schools.length; target += 1) {
         if (this.relationMatrix[actor][target] !== 'pursuit') continue;
+        const actorSchool = this.config.schools[actor];
+        const targetSchool = this.config.schools[target];
+        const telemetry = this._telemetryFor(actor, target);
+        const radius = captureRadius(
+          this.config,
+          actorSchool,
+          targetSchool
+        );
+        const pursuitSpeed = effectiveMaxSpeed(
+          this.config,
+          actorSchool,
+          'burst'
+        );
+        const evadeSpeed = effectiveMaxSpeed(
+          this.config,
+          targetSchool,
+          'evade'
+        );
+        const closingSpeed = pursuitSpeed - evadeSpeed;
         predatorPairs.push({
-          actor: this.config.schools[actor].id,
-          target: this.config.schools[target].id,
-          captureRadius: captureRadius(
-            this.config,
-            this.config.schools[actor],
-            this.config.schools[target]
-          ),
+          actor: actorSchool.id,
+          target: targetSchool.id,
+          captureRadius: radius,
           perPredatorCooldown: perPredatorCooldown(
             this._activeSchoolCount(actor),
             this.config.capture.targetCaptureRate
           ),
+          pursuitSpeed,
+          evadeSpeed,
+          closingSpeed,
+          nominalClosureSeconds:
+            closingSpeed > EPSILON
+              ? Math.max(
+                  0,
+                  this.derived.schools[actor].detectionLength - radius
+                ) / closingSpeed
+              : Infinity,
+          chaseStarts: telemetry.starts,
+          pursuitFrames: telemetry.pursuitFrames,
+          activeChases: telemetry.active,
+          captures: telemetry.captures,
+          abandoned: telemetry.abandoned,
+          conversion:
+            telemetry.starts > 0
+              ? telemetry.captures / telemetry.starts
+              : 0,
+          averageChaseSeconds:
+            telemetry.captures + telemetry.abandoned > 0
+              ? telemetry.completedDuration /
+                (telemetry.captures + telemetry.abandoned)
+              : 0,
+          averageCaptureChaseSeconds:
+            telemetry.captures > 0
+              ? telemetry.capturedDuration / telemetry.captures
+              : 0,
+          burstSeconds: telemetry.burstSeconds,
         });
       }
+    }
+    const ecologyWinner =
+      this.ecologyStatus.winnerIndex === null
+        ? null
+        : this.config.schools[this.ecologyStatus.winnerIndex];
+    const warnings = [];
+    if (
+      this.config.locomotion.burstFactor <=
+      this.config.locomotion.panicSpeedFactor
+    ) {
+      warnings.push('burstFactor ≤ panicSpeedFactor');
+    }
+    if (predatorPairs.some((pair) => pair.closingSpeed <= 0)) {
+      warnings.push('至少一条捕食关系的名义闭合速度 ≤ 0');
     }
     return {
       seed: this.seed,
@@ -1221,6 +1694,9 @@ export class ExperimentSimulation {
         neighborRadius: this.derived.schools[index].neighborRadius,
         detectionLength: this.derived.schools[index].detectionLength,
         measuredNeighbors: this.averageNeighbors(index),
+        averageEnergy: this.averageEnergy(index),
+        averageStamina: this.averageStamina(index),
+        deaths: { ...this.deathCounts[index] },
       })),
       relationMatrix: this.relationMatrix,
       pairCount: this.metricsState.pairCount,
@@ -1235,12 +1711,26 @@ export class ExperimentSimulation {
       renderFps: this.metricsState.renderFps ?? 0,
       predatorPairs,
       cascade: this.probe.report(),
+      ecology: {
+        state: this.ecologyStatus.state,
+        winnerId: ecologyWinner?.id ?? null,
+        winnerName: ecologyWinner?.name ?? null,
+        plankton: {
+          level: this.planktonLevel,
+          capacity: this.config.plankton.capacity,
+          fraction:
+            this.config.plankton.capacity > EPSILON
+              ? this.planktonLevel / this.config.plankton.capacity
+              : 0,
+          consumed: this.planktonConsumed,
+        },
+        deaths: this.deathCounts.map((entry, schoolIndex) => ({
+          schoolId: this.config.schools[schoolIndex].id,
+          ...entry,
+        })),
+      },
       tankVolume: tankVolume(this.config.tank),
-      warnings:
-        this.config.locomotion.burstFactor <=
-        this.config.locomotion.panicSpeedFactor
-          ? ['burstFactor ≤ panicSpeedFactor']
-          : [],
+      warnings,
       batch: this.lastBatch,
     };
   }
@@ -1262,49 +1752,86 @@ export class ExperimentSimulation {
       new Promise((resolve) => requestAnimationFrame(resolve));
     try {
       for (let seed = first; seed <= last; seed += 1) {
+        const controlConfig = deepClone(this.config);
+        controlConfig.runtime.seed = seed;
+        const control = new ExperimentSimulation({
+          scene: null,
+          config: controlConfig,
+          distanceField: this.distanceField,
+          physics: null,
+        });
+        control.batchRunning = true;
         this.reset(seed);
-        const baselineSteps = Math.ceil(
-          (this.config.holding.settleSeconds +
-            this.config.holding.baselineSeconds) /
-            dt
-        );
-        const eventSteps = Math.ceil(
-          this.config.holding.observationSeconds / dt
-        );
-        let sinceYield = 0;
-        for (let step = 0; step < baselineSteps; step += 1) {
-          this._advance(dt);
-          sinceYield += 1;
-          if (
-            sinceYield >=
-            this.config.cascadeJudge.batchStepsPerFrame
-          ) {
-            sinceYield = 0;
-            await yieldFrame();
+        try {
+          const baselineSteps = Math.ceil(
+            (this.config.holding.settleSeconds +
+              this.config.holding.baselineSeconds) /
+              dt
+          );
+          const eventSteps = Math.ceil(
+            this.config.holding.observationSeconds / dt
+          );
+          let sinceYield = 0;
+          for (let step = 0; step < baselineSteps; step += 1) {
+            this._advance(dt);
+            control._advance(dt);
+            sinceYield += 1;
+            if (
+              sinceYield >=
+              this.config.cascadeJudge.batchStepsPerFrame
+            ) {
+              sinceYield = 0;
+              await yieldFrame();
+            }
           }
-        }
-        this.releaseHolding({ force: true });
-        for (let step = 0; step < eventSteps; step += 1) {
-          this._advance(dt);
-          sinceYield += 1;
-          if (
-            sinceYield >=
-            this.config.cascadeJudge.batchStepsPerFrame
-          ) {
-            sinceYield = 0;
-            await yieldFrame();
+          this.releaseHolding({ force: true });
+          control.probe.beginControl(control.elapsed);
+          for (let step = 0; step < eventSteps; step += 1) {
+            this._advance(dt);
+            control._advance(dt);
+            sinceYield += 1;
+            if (
+              sinceYield >=
+              this.config.cascadeJudge.batchStepsPerFrame
+            ) {
+              sinceYield = 0;
+              await yieldFrame();
+            }
           }
+          const eventReport = this.probe.report();
+          const controlReport = control.probe.report();
+          const eventResult = this.probe.finalize();
+          const controlResult = control.probe.finalize();
+          const paired = analyzePairedCascade({
+            baselineSamples: eventReport.baselineSamples,
+            eventSamples: eventReport.eventSamples,
+            controlSamples: controlReport.eventSamples,
+            forbidden: eventReport.forbidden,
+            config: this.config,
+            tank: this.config.tank,
+          });
+          results.push({
+            seed,
+            passed: paired.passed,
+            diagnosticOnly: true,
+            event: eventResult,
+            control: controlResult,
+            paired,
+          });
+        } finally {
+          control.dispose();
         }
-        const result = this.probe.finalize();
-        results.push({ seed, ...result });
       }
-      const passes = results.filter((result) => result.passed).length;
+      const pairedPasses = results.filter(
+        (result) => result.paired.passed
+      ).length;
       this.lastBatch = {
         results,
-        passes,
+        pairedPasses,
         total: results.length,
-        required: this.config.cascadeJudge.requiredPasses,
-        passed: passes >= this.config.cascadeJudge.requiredPasses,
+        diagnosticOnly: true,
+        verdict:
+          'paired evidence only; no aggregate pass/fail delivery gate',
       };
       return this.lastBatch;
     } finally {

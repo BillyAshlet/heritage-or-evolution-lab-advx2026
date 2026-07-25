@@ -197,7 +197,7 @@
       }
       .project-tabs {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 1px;
         background: #c8d8e6;
       }
@@ -285,6 +285,13 @@
       }
       #experiment-dashboard header strong {
         color: #9d514b;
+      }
+      #experiment-dashboard[data-project="ecology"] {
+        border-color: #a8bb82;
+        box-shadow: inset 3px 0 #91b957;
+      }
+      #experiment-dashboard[data-project="ecology"] header strong {
+        color: #627d31;
       }
       #experiment-dashboard canvas {
         width: 100%;

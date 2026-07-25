@@ -125,14 +125,89 @@ export function perPredatorCooldown(activePredatorCount, targetCaptureRate) {
   return activePredatorCount / targetCaptureRate;
 }
 
+export function sustainedSpeedScale(config, school) {
+  if (!config.traits?.enabled) return 1;
+  return Math.max(
+    config.traits.minSustainedSpeedFactor,
+    school.size ** -config.traits.sizeSpeedPenaltyExponent
+  );
+}
+
+export function effectiveTurnSpeed(config, school) {
+  if (!config.traits?.enabled) return school.turnSpeed;
+  return (
+    school.turnSpeed *
+    Math.max(
+      config.traits.minTurnFactor,
+      school.size ** -config.traits.sizeTurnPenaltyExponent
+    )
+  );
+}
+
 export function effectiveMaxSpeed(config, school, state = 'cruise') {
-  if (state === 'pursuit') {
-    return school.maxSpeed * config.locomotion.burstFactor;
+  const sustainedScale = sustainedSpeedScale(config, school);
+  const sustainedMax = school.maxSpeed * sustainedScale;
+  if (state === 'pursuit' || state === 'burst') {
+    return sustainedMax * config.locomotion.burstFactor;
   }
   if (state === 'evade') {
-    return school.maxSpeed * config.locomotion.panicSpeedFactor;
+    return sustainedMax * config.locomotion.panicSpeedFactor;
   }
-  return school.maxSpeed;
+  if (state === 'stalk') {
+    return sustainedMax * (config.traits?.stalkSpeedFactor ?? 1);
+  }
+  if (state === 'recover') {
+    return sustainedMax * (config.traits?.recoverySpeedFactor ?? 1);
+  }
+  return sustainedMax;
+}
+
+export function metabolicRate(config, school, bursting = false) {
+  const ecology = config.ecology;
+  const basal =
+    ecology.basalRate /
+    Math.max(EPSILON, school.size ** ecology.basalSizeExponent);
+  return basal + (bursting ? ecology.burstMetabolicRate : 0);
+}
+
+export function stepPlankton({
+  level,
+  capacity,
+  growthRate,
+  requestedConsumption,
+  dt,
+}) {
+  const safeCapacity = Math.max(EPSILON, capacity);
+  const current = Math.max(0, Math.min(safeCapacity, level));
+  const growth =
+    growthRate * current * (1 - current / safeCapacity) * Math.max(0, dt);
+  const available = Math.min(safeCapacity, current + growth);
+  const consumed = Math.min(
+    available,
+    Math.max(0, requestedConsumption)
+  );
+  return {
+    level: Math.max(0, available - consumed),
+    growth,
+    consumed,
+    fulfillment:
+      requestedConsumption > EPSILON
+        ? consumed / requestedConsumption
+        : 1,
+  };
+}
+
+export function ecologyOutcome(aliveCounts) {
+  const surviving = aliveCounts
+    .map((count, index) => ({ count, index }))
+    .filter((item) => item.count > 0);
+  if (surviving.length === 0) {
+    return { state: 'collapse', winnerIndex: null };
+  }
+  if (surviving.length === 1) {
+    return { state: 'winner', winnerIndex: surviving[0].index };
+  }
+  return { state: 'running', winnerIndex: null };
 }
 
 export function relationForRatio(ratio, relations, previous = 'ignore') {
@@ -503,9 +578,107 @@ export function analyzeCascadeSeries({
   };
 }
 
+export function analyzePairedCascade({
+  baselineSamples,
+  eventSamples,
+  controlSamples,
+  forbidden,
+  config,
+  tank,
+}) {
+  const judge = config.cascadeJudge;
+  const baselineMedium = mean(
+    baselineSamples.map((sample) => sample.rogMedium)
+  );
+  const baselineSmall = mean(
+    baselineSamples.map((sample) => sample.rogSmall)
+  );
+  const baselineNeighborsMedium = mean(
+    baselineSamples.map((sample) => sample.neighborsMedium)
+  );
+  const baselineNeighborsSmall = mean(
+    baselineSamples.map((sample) => sample.neighborsSmall)
+  );
+  const sampleCount = Math.min(
+    eventSamples.length,
+    controlSamples.length
+  );
+  const samples = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    const event = eventSamples[index];
+    const control = controlSamples[index];
+    samples.push({
+      time: Math.min(event.time, control.time),
+      deltaMedium:
+        (event.rogMedium - control.rogMedium) /
+        Math.max(EPSILON, baselineMedium),
+      deltaSmall:
+        (event.rogSmall - control.rogSmall) /
+        Math.max(EPSILON, baselineSmall),
+      eventMedium: event.rogMedium,
+      controlMedium: control.rogMedium,
+      eventSmall: event.rogSmall,
+      controlSmall: control.rogSmall,
+    });
+  }
+  const mediumPeak = peakSample(samples, 'deltaMedium');
+  const smallPeak = peakSample(samples, 'deltaSmall');
+  const shortestSide = Math.min(tank.width, tank.height, tank.depth);
+  const checks = {
+    baselineShape:
+      baselineMedium <
+        shortestSide * judge.maxBaselineRogShortestSideFactor &&
+      baselineSmall <
+        shortestSide * judge.maxBaselineRogShortestSideFactor,
+    baselineNeighbors:
+      baselineNeighborsMedium > judge.minAverageNeighbors &&
+      baselineNeighborsSmall > judge.minAverageNeighbors,
+    mediumControlDelta:
+      Boolean(mediumPeak) &&
+      mediumPeak.deltaMedium >= judge.pairedMinMediumDelta,
+    smallControlDelta:
+      Boolean(smallPeak) &&
+      smallPeak.deltaSmall >= judge.pairedMinSmallDelta,
+    differentialLag:
+      Boolean(mediumPeak && smallPeak) &&
+      smallPeak.time - mediumPeak.time >= judge.minPeakLag,
+    noDirectLargeSmall:
+      (forbidden.pursuit ?? 0) === 0 &&
+      (forbidden.directThreat ?? 0) === 0 &&
+      (forbidden.captures ?? 0) === 0,
+  };
+  return {
+    passed: Object.values(checks).every(Boolean),
+    diagnosticOnly: true,
+    checks,
+    baseline: {
+      mediumRog: baselineMedium,
+      smallRog: baselineSmall,
+      mediumNeighbors: baselineNeighborsMedium,
+      smallNeighbors: baselineNeighborsSmall,
+    },
+    samples,
+    peaks: {
+      medium: mediumPeak,
+      small: smallPeak,
+      lag:
+        mediumPeak && smallPeak ? smallPeak.time - mediumPeak.time : null,
+    },
+    effects: {
+      medium: mediumPeak?.deltaMedium ?? null,
+      small: smallPeak?.deltaSmall ?? null,
+    },
+  };
+}
+
 export function modeFlags(mode) {
-  const steady = mode === 'steady';
-  return { captureEnabled: steady, respawnEnabled: steady };
+  if (mode === 'cascade') {
+    return { captureEnabled: false, respawnEnabled: false };
+  }
+  if (mode === 'ecology') {
+    return { captureEnabled: true, respawnEnabled: false };
+  }
+  return { captureEnabled: true, respawnEnabled: true };
 }
 
 export function isRespawnCandidate({

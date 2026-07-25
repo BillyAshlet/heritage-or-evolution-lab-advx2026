@@ -45,6 +45,18 @@ function restoreDefaultSchoolLayout(stage) {
   }
 }
 
+function applyPopulationPreset(stage) {
+  const presets = {
+    full: { small: 400, medium: 200, large: 40 },
+    performance: { small: 200, medium: 80, large: 20 },
+  };
+  const counts = presets[stage.runtime.populationPreset];
+  if (!counts) return;
+  for (const school of stage.schools) {
+    if (counts[school.id] !== undefined) school.count = counts[school.id];
+  }
+}
+
 function applyProjectPreset(stage) {
   if (stage.runtime.project === 'aquarium') {
     Object.assign(stage.tank, {
@@ -57,6 +69,7 @@ function applyProjectPreset(stage) {
     stage.runtime.mode = 'steady';
     stage.holding.enabled = false;
     stage.relations.policy = 'size';
+    stage.traits.enabled = false;
     restoreDefaultSchoolLayout(stage);
   } else if (stage.runtime.project === 'cascade') {
     Object.assign(stage.tank, { width: 3, height: 1.8, depth: 1.2 });
@@ -65,6 +78,7 @@ function applyProjectPreset(stage) {
     stage.runtime.mode = 'cascade';
     stage.holding.enabled = true;
     stage.relations.policy = 'window';
+    stage.traits.enabled = false;
     restoreDefaultSchoolLayout(stage);
   } else if (stage.runtime.project === 'obstacle') {
     Object.assign(stage.tank, { width: 2, height: 1.2, depth: 0.8 });
@@ -73,6 +87,7 @@ function applyProjectPreset(stage) {
     stage.runtime.mode = 'steady';
     stage.holding.enabled = false;
     stage.relations.policy = 'size';
+    stage.traits.enabled = false;
     const obstacleCenters = {
       small: 0.23,
       medium: 0,
@@ -85,11 +100,28 @@ function applyProjectPreset(stage) {
       school.spawnRegion.radius = school.id === 'large' ? 0.14 : 0.18;
       school.initialHeading = { x: 0, y: 0, z: 1 };
     }
+  } else if (stage.runtime.project === 'ecology') {
+    Object.assign(stage.tank, {
+      preset: 'ecology',
+      width: 3,
+      height: 1.8,
+      depth: 1.2,
+    });
+    stage.obstacles.enabled = false;
+    stage.runtime.mode = 'ecology';
+    stage.holding.enabled = false;
+    stage.relations.policy = 'size';
+    stage.traits.enabled = true;
+    restoreDefaultSchoolLayout(stage);
   }
 }
 
 function applyTankPreset(stage) {
-  if (['aquarium', 'cascade', 'obstacle'].includes(stage.tank.preset)) {
+  if (
+    ['aquarium', 'cascade', 'obstacle', 'ecology'].includes(
+      stage.tank.preset
+    )
+  ) {
     stage.runtime.project = stage.tank.preset;
     applyProjectPreset(stage);
   }
@@ -151,6 +183,11 @@ async function bootstrap() {
     applyConfig(mode = 'rebuildScene', sourcePath = '') {
       if (sourcePath === 'runtime.project') applyProjectPreset(stage);
       if (sourcePath === 'tank.preset') applyTankPreset(stage);
+      if (sourcePath === 'runtime.populationPreset') {
+        applyPopulationPreset(stage);
+      } else if (/^schools\.\d+\.count$/.test(sourcePath)) {
+        stage.runtime.populationPreset = 'custom';
+      }
       const result = validateConfig(stage);
       if (!result.valid) throw new Error(result.errors.join('\n'));
       current = deepClone(stage);
@@ -220,6 +257,7 @@ async function bootstrap() {
       template.targetNeighbors = Math.min(8, template.count - 1);
       template.spawnRegion.centerX = 0;
       stage.schools.push(template);
+      stage.runtime.populationPreset = 'custom';
       return this.applyConfig('rebuildScene');
     },
     removeSchool(index = stage.schools.length - 1) {
@@ -231,6 +269,7 @@ async function bootstrap() {
         Math.min(stage.schools.length - 1, index)
       );
       const [removed] = stage.schools.splice(safeIndex, 1);
+      stage.runtime.populationPreset = 'custom';
       if (removed?.id === stage.holding.schoolId) {
         stage.holding.schoolId = stage.schools
           .slice()

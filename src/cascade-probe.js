@@ -27,6 +27,7 @@ export class CascadeProbe {
     this.baselineSamples = [];
     this.eventSamples = [];
     this.released = false;
+    this.control = false;
     this.releaseTime = null;
     this.nextSampleTime = 0;
     this.impulseByDirection = {
@@ -52,6 +53,16 @@ export class CascadeProbe {
   release(time) {
     this.released = true;
     this.releaseTime = time;
+    this.control = false;
+    this.eventSamples = [];
+    this.result = null;
+    this.nextSampleTime = time;
+  }
+
+  beginControl(time) {
+    this.released = true;
+    this.releaseTime = time;
+    this.control = true;
     this.eventSamples = [];
     this.result = null;
     this.nextSampleTime = time;
@@ -212,6 +223,7 @@ export class CascadeProbe {
   report() {
     return {
       released: this.released,
+      control: Boolean(this.control),
       releaseTime: this.releaseTime,
       baselineReady: this.baselineStatus(),
       baselineSamples: this.lockedBaseline ?? this.baselineSamples,

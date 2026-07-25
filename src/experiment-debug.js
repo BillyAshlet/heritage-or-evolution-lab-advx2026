@@ -24,6 +24,12 @@ const PROJECTS = {
     description: '穿孔地图、距离场和 Rapier 六自由度物体的独立验证场。',
     dashboard: 'MAP / PHYSICS',
   },
+  ecology: {
+    eyebrow: 'SUB-EXPERIMENT 03',
+    title: '生态淘汰',
+    description: '可耗竭浮游、真实饥饿与有限耐力捕食；仅剩一个种群时结算。',
+    dashboard: 'ECOLOGY LEDGER',
+  },
 };
 
 const SCHOOL_SECTIONS = [
@@ -36,6 +42,11 @@ const SCHOOL_SECTIONS = [
     title: '运动',
     expanded: true,
     fields: ['cruiseSpeed', 'maxSpeed', 'turnSpeed'],
+  },
+  {
+    title: '生态角色',
+    expanded: false,
+    fields: ['grazeRate'],
   },
   {
     title: '群游',
@@ -65,7 +76,12 @@ const MAP_GROUPS = new Set([
   'Rapier 物理',
   'Advanced · Physics Spawn',
 ]);
-const CAPTURE_GROUPS = new Set(['捕获与补充', '捕获特效']);
+const ECOLOGY_GROUPS = new Set([
+  'Trait Coupling',
+  '生态能量',
+  '浮游资源',
+]);
+const CAPTURE_GROUPS = new Set(['捕食', '补充', '捕获特效']);
 
 function downloadText(filename, text, type = 'application/json') {
   const blob = new Blob([text], { type });
@@ -108,7 +124,12 @@ function groupVisible(project, group) {
   if (MAP_GROUPS.has(group) || group.startsWith('障碍 ·')) {
     return project === 'obstacle';
   }
-  if (CAPTURE_GROUPS.has(group)) return project !== 'cascade';
+  if (ECOLOGY_GROUPS.has(group)) return project === 'ecology';
+  if (CAPTURE_GROUPS.has(group)) {
+    if (project === 'cascade') return false;
+    if (project === 'ecology' && group === '补充') return false;
+    return true;
+  }
   return group !== '项目';
 }
 
@@ -196,7 +217,12 @@ export function createExperimentDebug({
   function addActionButtons(root) {
     const project = controller.stage.runtime.project;
     const run = root.addFolder({
-      title: project === 'aquarium' ? '主项目操作' : '子实验操作',
+      title:
+        project === 'aquarium'
+          ? '主项目操作'
+          : project === 'ecology'
+            ? '生态实验操作'
+            : '子实验操作',
       expanded: true,
     });
     if (project === 'cascade') {
@@ -209,7 +235,7 @@ export function createExperimentDebug({
         stateLabel.textContent = 'batch running…';
         const result = await simulation.runBatch();
         stateLabel.textContent =
-          `${result.passes}/${result.total} ${result.passed ? 'PASS' : 'FAIL'}`;
+          `${result.pairedPasses}/${result.total} paired evidence`;
       });
     } else {
       releaseButton = null;
@@ -293,11 +319,15 @@ export function createExperimentDebug({
       if (spec.applyMode !== 'live' && !event.last) return;
       try {
         controller.applyConfig(spec.applyMode, spec.path);
-        if (spec.path === 'tank.preset') {
+        if (
+          spec.path === 'tank.preset' ||
+          spec.path === 'runtime.populationPreset'
+        ) {
           setTimeout(rebuildPane, 0);
         } else if (
           spec.path.endsWith('.name') ||
-          spec.path.endsWith('.id')
+          spec.path.endsWith('.id') ||
+          spec.path.endsWith('.count')
         ) {
           setTimeout(rebuildPane, 0);
         }
@@ -458,7 +488,13 @@ export function createExperimentDebug({
 
   function drawChart(metrics) {
     if (metrics.project !== 'cascade') return;
-    const samples = metrics.cascade.eventSamples;
+    const batchRecord =
+      metrics.batch?.results.find((item) => item.seed === metrics.seed) ??
+      metrics.batch?.results?.[0];
+    const pairedSamples = batchRecord?.paired?.samples ?? [];
+    const liveSamples = metrics.cascade.eventSamples;
+    const pairedView = liveSamples.length < 2 && pairedSamples.length >= 2;
+    const samples = pairedView ? pairedSamples : liveSamples;
     context.clearRect(0, 0, chart.width, chart.height);
     context.fillStyle = '#f8f4ec';
     context.fillRect(0, 0, chart.width, chart.height);
@@ -469,19 +505,27 @@ export function createExperimentDebug({
     context.lineTo(chart.width - 8, chart.height - 20);
     context.stroke();
     if (samples.length < 2) return;
-    const keys = [
-      ['rogSmall', '#4f9fcf'],
-      ['rogMedium', '#e5a441'],
-      ['rogLarge', '#c95252'],
-    ];
+    const keys = pairedView
+      ? [
+          ['eventSmall', '#4f9fcf', 2, []],
+          ['controlSmall', '#4f9fcf', 1, [4, 3]],
+          ['eventMedium', '#e5a441', 2, []],
+          ['controlMedium', '#e5a441', 1, [4, 3]],
+        ]
+      : [
+          ['rogSmall', '#4f9fcf', 2, []],
+          ['rogMedium', '#e5a441', 2, []],
+          ['rogLarge', '#c95252', 1, []],
+        ];
     const maxTime = Math.max(...samples.map((sample) => sample.time), 1);
     const maxValue = Math.max(
       ...samples.flatMap((sample) => keys.map(([key]) => sample[key])),
       0.01
     );
-    for (const [key, color] of keys) {
+    for (const [key, color, width, dash] of keys) {
       context.strokeStyle = color;
-      context.lineWidth = key === 'rogLarge' ? 1 : 2;
+      context.lineWidth = width;
+      context.setLineDash(dash);
       context.globalAlpha = key === 'rogLarge' ? 0.5 : 1;
       context.beginPath();
       samples.forEach((sample, index) => {
@@ -495,11 +539,22 @@ export function createExperimentDebug({
       });
       context.stroke();
     }
-    const result = metrics.cascade.result;
+    context.setLineDash([]);
+    const result = pairedView
+      ? batchRecord.paired
+      : metrics.cascade.result;
     if (result) {
       for (const [role, key, color] of [
-        ['medium', 'rogMedium', '#e5a441'],
-        ['small', 'rogSmall', '#4f9fcf'],
+        [
+          'medium',
+          pairedView ? 'eventMedium' : 'rogMedium',
+          '#e5a441',
+        ],
+        [
+          'small',
+          pairedView ? 'eventSmall' : 'rogSmall',
+          '#4f9fcf',
+        ],
       ]) {
         const peak = result.peaks[role];
         if (!peak) continue;
@@ -517,7 +572,11 @@ export function createExperimentDebug({
     context.globalAlpha = 1;
     context.font = '9px ui-monospace';
     context.fillStyle = '#6d8497';
-    context.fillText('大群曲线仅供参考', 34, 18);
+    context.fillText(
+      pairedView ? '实线释放 · 虚线 holding 对照' : '大群曲线仅供参考',
+      34,
+      18
+    );
   }
 
   function updateSelectedSchool(metrics) {
@@ -549,24 +608,33 @@ export function createExperimentDebug({
     document.getElementById('lab-title').textContent = meta.title;
     document.getElementById('lab-subtitle').textContent =
       `${meta.eyebrow} · Three.js + Rapier Web`;
-    stateLabel.textContent =
-      simulation.batchRunning
-        ? 'batch running…'
-        : metrics.project === 'aquarium'
-          ? 'LIVE · SIZE ROLES'
-          : metrics.project === 'obstacle'
-            ? 'LIVE · FIELD'
-            : metrics.batch && !metrics.released
-              ? `${metrics.batch.passes}/${metrics.batch.total} ${metrics.batch.passed ? 'PASS' : 'FAIL'}`
-              : status
-                ? status.passed
-                  ? 'PASS'
-                  : 'FAIL'
-                : metrics.released
-                  ? 'recording'
-                  : metrics.canRelease.ready
-                    ? 'ready'
-                    : metrics.canRelease.reason;
+    let stateText = 'running';
+    if (simulation.batchRunning) {
+      stateText = 'batch running…';
+    } else if (metrics.project === 'aquarium') {
+      stateText = 'LIVE · SIZE ROLES';
+    } else if (metrics.project === 'obstacle') {
+      stateText = 'LIVE · FIELD';
+    } else if (metrics.project === 'ecology') {
+      stateText =
+        metrics.ecology.state === 'winner'
+          ? `WIN · ${metrics.ecology.winnerName}`
+          : metrics.ecology.state === 'collapse'
+            ? 'COLLAPSE · NO WINNER'
+            : 'LIVE · ENERGY';
+    } else if (metrics.batch && !metrics.released) {
+      stateText =
+        `${metrics.batch.pairedPasses}/${metrics.batch.total} paired evidence`;
+    } else if (status) {
+      stateText = 'event-only diagnostic';
+    } else {
+      stateText = metrics.released
+        ? 'recording event'
+        : metrics.canRelease.ready
+          ? 'ready'
+          : metrics.canRelease.reason;
+    }
+    stateLabel.textContent = stateText;
     if (releaseButton) {
       releaseButton.disabled =
         metrics.mode !== 'cascade' ||
@@ -583,10 +651,13 @@ export function createExperimentDebug({
       )
       .join('\n');
     const population = metrics.population
-      .map(
-        (item) =>
-          `${item.name} ${item.alive}/${item.target} size=${item.size.toFixed(2)} r=${item.neighborRadius.toFixed(3)}`
-      )
+      .map((item) => {
+        const ecology =
+          metrics.project === 'ecology'
+            ? ` E=${(item.averageEnergy * 100).toFixed(0)}% S=${(item.averageStamina * 100).toFixed(0)}% dead=${item.deaths.captured}/${item.deaths.starved}`
+            : '';
+        return `${item.name} ${item.alive}/${item.target} size=${item.size.toFixed(2)} r=${item.neighborRadius.toFixed(3)}${ecology}`;
+      })
       .join('\n');
     const result =
       metrics.project === 'cascade' && status
@@ -594,11 +665,24 @@ export function createExperimentDebug({
         : metrics.project === 'cascade'
           ? 'lag=—  impulse=—  attribution=—'
           : '';
+    const pairedRecord =
+      metrics.batch?.results.find((item) => item.seed === metrics.seed) ??
+      metrics.batch?.results?.[0];
+    const paired = metrics.batch
+      ? `paired=${metrics.batch.pairedPasses}/${metrics.batch.total}（诊断，不作交付硬门）` +
+        `${
+          pairedRecord
+            ? `\nseed ${pairedRecord.seed} ΔM=${(pairedRecord.paired.effects.medium * 100).toFixed(1)}% ΔS=${(pairedRecord.paired.effects.small * 100).toFixed(1)}% lag=${pairedRecord.paired.peaks.lag?.toFixed(2) ?? '—'}s`
+            : ''
+        }`
+      : '';
     const capture = metrics.predatorPairs
-      .map(
-        (pair) =>
-          `${pair.actor}→${pair.target} capture=${pair.captureRadius.toFixed(3)} cooldown=${pair.perPredatorCooldown.toFixed(1)}s`
-      )
+      .map((pair) => {
+        const closure = Number.isFinite(pair.nominalClosureSeconds)
+          ? `${pair.nominalClosureSeconds.toFixed(2)}s`
+          : '∞';
+        return `${pair.actor}→${pair.target} cap=${pair.captures}/${pair.chaseStarts} ${(pair.conversion * 100).toFixed(1)}% chase=${pair.averageChaseSeconds.toFixed(2)}s close=${closure}`;
+      })
       .join('\n');
     const bodies = metrics.rigidBodies
       .map((body) => `${body.type}@y=${body.position[1].toFixed(2)}`)
@@ -607,9 +691,16 @@ export function createExperimentDebug({
       `${population}\n\n体型派生关系（行作用于列）\n${matrix}` +
       `${capture ? `\n${capture}` : ''}` +
       `${result ? `\n\n${result}` : ''}` +
+      `${paired ? `\n${paired}` : ''}` +
+      `${
+        metrics.project === 'ecology'
+          ? `\n\nplankton=${metrics.ecology.plankton.level.toFixed(1)}/${metrics.ecology.plankton.capacity.toFixed(0)} consumed=${metrics.ecology.plankton.consumed.toFixed(1)}\noutcome=${metrics.ecology.state}${metrics.ecology.winnerName ? ` winner=${metrics.ecology.winnerName}` : ''}`
+          : ''
+      }` +
       `\npairs=${metrics.pairCount} sim=${metrics.simulationMs.toFixed(1)}ms render=${metrics.renderFps.toFixed(0)}fps` +
       `\ncaptures=${metrics.captures} fx=${metrics.captureParticles} respawn=${metrics.respawned}/${metrics.queuedRespawns}` +
-      `\nbodies=${bodies || '—'} contacts=${metrics.dynamicContacts}`;
+      `\nbodies=${bodies || '—'} contacts=${metrics.dynamicContacts}` +
+      `${metrics.warnings.length ? `\nwarning: ${metrics.warnings.join(' · ')}` : ''}`;
     drawChart(metrics);
   }
 

@@ -23,6 +23,7 @@ function school({
     cruiseSpeed: 0.23,
     maxSpeed: 0.46,
     turnSpeed: 2.8,
+    grazeRate: id === 'small' ? 1 : id === 'medium' ? 0.25 : 0,
     separationWeight: 0.6,
     alignmentWeight: 0.7,
     cohesionWeight: id === 'small' ? 0.9 : id === 'medium' ? 2 : 1.2,
@@ -43,6 +44,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
   runtime: {
     project: 'aquarium',
     mode: 'steady',
+    populationPreset: 'full',
     seed: 1001,
     timeScale: 1,
     fixedDt: 1 / 60,
@@ -115,6 +117,42 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     avoidanceInertia: 0.72,
     wanderWeight: 0.08,
   },
+  traits: {
+    enabled: false,
+    sizeSpeedPenaltyExponent: 0.2,
+    minSustainedSpeedFactor: 0.55,
+    sizeTurnPenaltyExponent: 0.55,
+    minTurnFactor: 0.45,
+    stalkSpeedFactor: 0.82,
+    recoverySpeedFactor: 0.72,
+    ambushDistanceFactor: 0.68,
+    staminaDrainRate: 0.28,
+    staminaRecoveryRate: 0.16,
+    burstStartStamina: 0.45,
+    burstStopStamina: 0.12,
+  },
+  ecology: {
+    energyCapacity: 1,
+    initialEnergyRatio: 0.82,
+    basalRate: 0.02,
+    basalSizeExponent: 0.75,
+    burstMetabolicRate: 0.035,
+    captureEnergyPerSize: 1,
+    starvationVfxEnabled: true,
+  },
+  plankton: {
+    enabled: true,
+    capacity: 600,
+    initialFraction: 0.8,
+    growthRate: 0.12,
+    halfSaturationFraction: 0.2,
+    maxIntakePerFish: 0.04,
+    energyConversion: 1,
+    visualCount: 1200,
+    pointSize: 0.012,
+    color: '#91b957',
+    opacity: 0.72,
+  },
   visual: {
     bodyLength: 0.03,
     bodyRadius: 0.008,
@@ -173,9 +211,10 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     minAverageNeighbors: 3,
     maxBaselineRogShortestSideFactor: 0.5,
     sampleInterval: 0.1,
+    pairedMinMediumDelta: 0.05,
+    pairedMinSmallDelta: 0.1,
     firstSeed: 1001,
     lastSeed: 1010,
-    requiredPasses: 7,
     batchStepsPerFrame: 3,
   },
   spatialHash: {
@@ -306,11 +345,29 @@ const scalarEntries = [
       '主项目 · 水族馆': 'aquarium',
       '子实验 · 营养级联': 'cascade',
       '子实验 · 地图与刚体': 'obstacle',
+      '子实验 · 生态淘汰': 'ecology',
     },
   }),
   entry('runtime.mode', 'Advanced · Runtime', 'mode', 'reset', {
-    options: { Cascade: 'cascade', 'Steady State': 'steady' },
+    options: {
+      Cascade: 'cascade',
+      'Steady State': 'steady',
+      Ecology: 'ecology',
+    },
   }),
+  entry(
+    'runtime.populationPreset',
+    '运行',
+    'population preset',
+    'rebuildScene',
+    {
+      options: {
+        '完整 640': 'full',
+        '性能 300': 'performance',
+        '自定义': 'custom',
+      },
+    }
+  ),
   entry('runtime.seed', '运行', 'seed', 'reset', {
     min: 1,
     max: 999999,
@@ -331,6 +388,7 @@ const scalarEntries = [
       Aquarium: 'aquarium',
       Cascade: 'cascade',
       Obstacle: 'obstacle',
+      Ecology: 'ecology',
       Custom: 'custom',
     },
   }),
@@ -509,6 +567,187 @@ const scalarEntries = [
     max: 1,
     step: 0.01,
   }),
+  entry('traits.enabled', 'Trait Coupling', '体型耦合启用', 'live'),
+  entry(
+    'traits.sizeSpeedPenaltyExponent',
+    'Trait Coupling',
+    'size → speed exponent',
+    'live',
+    { min: 0, max: 2, step: 0.01 }
+  ),
+  entry(
+    'traits.minSustainedSpeedFactor',
+    'Trait Coupling',
+    'min sustained speed ×',
+    'live',
+    { min: 0.1, max: 1, step: 0.01 }
+  ),
+  entry(
+    'traits.sizeTurnPenaltyExponent',
+    'Trait Coupling',
+    'size → turn exponent',
+    'live',
+    { min: 0, max: 2, step: 0.01 }
+  ),
+  entry(
+    'traits.minTurnFactor',
+    'Trait Coupling',
+    'min turn ×',
+    'live',
+    { min: 0.1, max: 1, step: 0.01 }
+  ),
+  entry(
+    'traits.stalkSpeedFactor',
+    'Trait Coupling',
+    'stalk speed ×',
+    'live',
+    { min: 0.1, max: 1.5, step: 0.01 }
+  ),
+  entry(
+    'traits.recoverySpeedFactor',
+    'Trait Coupling',
+    'recovery speed ×',
+    'live',
+    { min: 0.1, max: 1.5, step: 0.01 }
+  ),
+  entry(
+    'traits.ambushDistanceFactor',
+    'Trait Coupling',
+    'ambush distance ×',
+    'live',
+    { min: 0.1, max: 1, step: 0.01 }
+  ),
+  entry(
+    'traits.staminaDrainRate',
+    'Trait Coupling',
+    'stamina drain /s',
+    'live',
+    { min: 0, max: 3, step: 0.01 }
+  ),
+  entry(
+    'traits.staminaRecoveryRate',
+    'Trait Coupling',
+    'stamina recovery /s',
+    'live',
+    { min: 0, max: 3, step: 0.01 }
+  ),
+  entry(
+    'traits.burstStartStamina',
+    'Trait Coupling',
+    'burst start stamina',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry(
+    'traits.burstStopStamina',
+    'Trait Coupling',
+    'burst stop stamina',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry(
+    'ecology.energyCapacity',
+    '生态能量',
+    'energy capacity',
+    'reset',
+    { min: 0.05, max: 20, step: 0.05 }
+  ),
+  entry(
+    'ecology.initialEnergyRatio',
+    '生态能量',
+    'initial energy',
+    'reset',
+    { min: 0.01, max: 1, step: 0.01 }
+  ),
+  entry('ecology.basalRate', '生态能量', 'basal drain /s', 'live', {
+    min: 0,
+    max: 1,
+    step: 0.001,
+  }),
+  entry(
+    'ecology.basalSizeExponent',
+    '生态能量',
+    'basal size exponent',
+    'live',
+    { min: 0, max: 3, step: 0.01 }
+  ),
+  entry(
+    'ecology.burstMetabolicRate',
+    '生态能量',
+    'burst drain /s',
+    'live',
+    { min: 0, max: 2, step: 0.005 }
+  ),
+  entry(
+    'ecology.captureEnergyPerSize',
+    '生态能量',
+    'capture energy / prey size',
+    'live',
+    { min: 0, max: 10, step: 0.05 }
+  ),
+  entry(
+    'ecology.starvationVfxEnabled',
+    '生态能量',
+    'starvation effect',
+    'live'
+  ),
+  entry('plankton.enabled', '浮游资源', 'plankton enabled', 'live'),
+  entry('plankton.capacity', '浮游资源', 'carrying capacity', 'reset', {
+    min: 1,
+    max: 10000,
+    step: 1,
+  }),
+  entry(
+    'plankton.initialFraction',
+    '浮游资源',
+    'initial fraction',
+    'reset',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry('plankton.growthRate', '浮游资源', 'logistic growth /s', 'live', {
+    min: 0,
+    max: 3,
+    step: 0.01,
+  }),
+  entry(
+    'plankton.halfSaturationFraction',
+    '浮游资源',
+    'half saturation',
+    'live',
+    { min: 0.001, max: 1, step: 0.001 }
+  ),
+  entry(
+    'plankton.maxIntakePerFish',
+    '浮游资源',
+    'max intake / fish /s',
+    'live',
+    { min: 0, max: 2, step: 0.001 }
+  ),
+  entry(
+    'plankton.energyConversion',
+    '浮游资源',
+    'energy / plankton',
+    'live',
+    { min: 0, max: 10, step: 0.01 }
+  ),
+  entry(
+    'plankton.visualCount',
+    '浮游资源',
+    'visible particles',
+    'rebuildScene',
+    { min: 0, max: 10000, step: 1 }
+  ),
+  entry('plankton.pointSize', '浮游资源', 'particle size', 'live', {
+    min: 0.001,
+    max: 0.08,
+    step: 0.001,
+  }),
+  entry('plankton.color', '浮游资源', 'particle color', 'live'),
+  entry('plankton.opacity', '浮游资源', 'particle opacity', 'live', {
+    min: 0.05,
+    max: 1,
+    step: 0.01,
+  }),
   entry('visual.bodyLength', 'Advanced · Visual', 'body length', 'rebuildScene', {
     min: 0.005,
     max: 0.12,
@@ -531,14 +770,14 @@ const scalarEntries = [
     max: 1,
     step: 0.01,
   }),
-  entry('capture.targetCaptureRate', '捕获与补充', 'captures /s / school', 'live', {
+  entry('capture.targetCaptureRate', '捕食', 'captures /s / school', 'live', {
     min: 0.05,
     max: 20,
     step: 0.05,
   }),
   entry(
     'capture.captureLengthFactor',
-    '捕获与补充',
+    '捕食',
     'capture length ×',
     'live',
     { min: 0.1, max: 2, step: 0.01 }
@@ -613,29 +852,29 @@ const scalarEntries = [
     max: 12,
     step: 0.1,
   }),
-  entry('respawn.delay', '捕获与补充', 'respawn delay', 'live', {
+  entry('respawn.delay', '补充', 'respawn delay', 'live', {
     min: 0,
     max: 30,
     step: 0.1,
   }),
-  entry('respawn.retryInterval', '捕获与补充', 'retry interval', 'live', {
+  entry('respawn.retryInterval', '补充', 'retry interval', 'live', {
     min: 0.05,
     max: 5,
     step: 0.05,
   }),
-  entry('respawn.maxAttempts', '捕获与补充', 'spawn attempts', 'live', {
+  entry('respawn.maxAttempts', '补充', 'spawn attempts', 'live', {
     min: 1,
     max: 100,
     step: 1,
   }),
-  entry('respawn.edgeBand', '捕获与补充', 'edge band', 'live', {
+  entry('respawn.edgeBand', '补充', 'edge band', 'live', {
     min: 0.01,
     max: 0.5,
     step: 0.01,
   }),
   entry(
     'respawn.predatorSafetyFactor',
-    '捕获与补充',
+    '补充',
     'predator safety ×',
     'live',
     { min: 0.5, max: 5, step: 0.05 }
@@ -756,6 +995,20 @@ const scalarEntries = [
     'reset',
     { min: 1 / 60, max: 1, step: 1 / 60 }
   ),
+  entry(
+    'cascadeJudge.pairedMinMediumDelta',
+    'Cascade 判据',
+    'paired medium Δ',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
+  entry(
+    'cascadeJudge.pairedMinSmallDelta',
+    'Cascade 判据',
+    'paired small Δ',
+    'live',
+    { min: 0, max: 1, step: 0.01 }
+  ),
   entry('cascadeJudge.firstSeed', 'Cascade 判据', 'first seed', 'live', {
     min: 1,
     max: 999999,
@@ -764,11 +1017,6 @@ const scalarEntries = [
   entry('cascadeJudge.lastSeed', 'Cascade 判据', 'last seed', 'live', {
     min: 1,
     max: 999999,
-    step: 1,
-  }),
-  entry('cascadeJudge.requiredPasses', 'Cascade 判据', 'required passes', 'live', {
-    min: 1,
-    max: 100,
     step: 1,
   }),
   entry(
@@ -993,6 +1241,11 @@ function schoolEntries(config) {
         max: 12,
         step: 0.1,
       }),
+      entry(`${p}.grazeRate`, group, 'plankton graze ×', 'live', {
+        min: 0,
+        max: 4,
+        step: 0.01,
+      }),
       entry(`${p}.separationWeight`, group, 'separation weight', 'live', {
         min: 0,
         max: 6,
@@ -1205,17 +1458,16 @@ export function validateConfig(candidate) {
     warnings.push('burstFactor ≤ panicSpeedFactor：捕食者可能无法闭合距离');
   }
   if (
+    candidate.traits?.burstStartStamina <=
+    candidate.traits?.burstStopStamina
+  ) {
+    errors.push('burstStartStamina 必须大于 burstStopStamina');
+  }
+  if (
     candidate.cascadeJudge?.lastSeed <
     candidate.cascadeJudge?.firstSeed
   ) {
     errors.push('lastSeed 必须不小于 firstSeed');
-  }
-  const batchCount =
-    candidate.cascadeJudge?.lastSeed -
-    candidate.cascadeJudge?.firstSeed +
-    1;
-  if (candidate.cascadeJudge?.requiredPasses > batchCount) {
-    errors.push('requiredPasses 不能大于 seed 数量');
   }
   return { valid: errors.length === 0, errors, warnings };
 }
