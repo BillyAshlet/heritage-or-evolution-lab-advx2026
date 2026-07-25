@@ -125,6 +125,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     minTurnFactor: 0.45,
   },
   ecology: {
+    enabled: true,
     energyCapacity: 1,
     initialEnergyRatio: 0.82,
     basalRate: 0.02,
@@ -583,6 +584,7 @@ const scalarEntries = [
     'live',
     { min: 0.1, max: 1, step: 0.01 }
   ),
+  entry('ecology.enabled', '生态能量', '耐力系统启用', 'reset'),
   entry(
     'ecology.energyCapacity',
     '生态能量',

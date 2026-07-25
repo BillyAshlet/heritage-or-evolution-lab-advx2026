@@ -392,7 +392,7 @@ export class ExperimentSimulation {
   _syncPlanktonVisual() {
     if (!this.planktonMesh) return;
     const visible =
-      this.config.runtime.mode === 'ecology' &&
+      this.config.ecology?.enabled &&
       this.config.plankton.enabled;
     this.planktonMesh.visible = visible;
     const fraction =
@@ -993,7 +993,7 @@ export class ExperimentSimulation {
   }
 
   _updateEcology(dt) {
-    if (this.config.runtime.mode !== 'ecology') return;
+    if (!this.config.ecology?.enabled) return;
     const plankton = this.config.plankton;
     const capacity = plankton.capacity;
     const halfSaturation =
@@ -1046,10 +1046,12 @@ export class ExperimentSimulation {
       if (this.energy[index] <= 0) starved.push(index);
     }
     for (const index of starved) this._killFish(index, 'starved');
-    const aliveCounts = this.config.schools.map((_, schoolIndex) =>
-      this._activeSchoolCount(schoolIndex)
-    );
-    this.ecologyStatus = ecologyOutcome(aliveCounts);
+    if (this.config.runtime.mode === 'ecology') {
+      const aliveCounts = this.config.schools.map((_, schoolIndex) =>
+        this._activeSchoolCount(schoolIndex)
+      );
+      this.ecologyStatus = ecologyOutcome(aliveCounts);
+    }
     this._syncPlanktonVisual();
   }
 
@@ -1112,7 +1114,7 @@ export class ExperimentSimulation {
       this._finishChase(predator, prey, true);
       this._killFish(prey, 'captured');
       this.metricsState.captures += 1;
-      if (this.config.runtime.mode === 'ecology') {
+      if (this.config.ecology?.enabled) {
         this.energy[predator] = Math.min(
           this.config.ecology.energyCapacity,
           this.energy[predator] +

@@ -245,3 +245,23 @@ test('ecology starvation is real death and sole survivor is terminal', () => {
   simulation._advance(1);
   assert.equal(simulation.elapsed, elapsed);
 });
+
+
+test('aquarium stamina drains without ecology winner freeze', () => {
+  const simulation = smallSimulation('steady');
+  simulation.config.ecology.enabled = true;
+  simulation.config.plankton.enabled = false;
+  simulation.energy[0] = 0.0001;
+  simulation._updateEcology(1);
+  assert.equal(simulation.alive[0], 0);
+  assert.equal(simulation.deathCounts[0].starved, 1);
+  for (let schoolIndex = 1; schoolIndex < 3; schoolIndex += 1) {
+    const range = simulation.schoolRanges[schoolIndex];
+    simulation.alive.fill(0, range.start, range.end);
+  }
+  simulation._updateEcology(0);
+  assert.equal(simulation.ecologyStatus.state, 'running');
+  const elapsed = simulation.elapsed;
+  simulation._advance(1 / 60);
+  assert.ok(simulation.elapsed > elapsed);
+});

@@ -50,7 +50,7 @@ const PROJECTS = {
   aquarium: {
     eyebrow: 'MAIN PROJECT',
     title: '主水族馆',
-    description: '体型实时决定捕食者与被捕食者；捕获后死亡永久生效。',
+    description: '体型实时决定捕食者与被捕食者；耐力与浮游已启用，饿死永久生效。',
     dashboard: 'LIVE FOOD WEB',
   },
   obstacle: {
@@ -168,7 +168,9 @@ function groupVisible(project, group) {
   if (MAP_GROUPS.has(group) || group.startsWith('障碍 ·')) {
     return project === 'obstacle';
   }
-  if (ECOLOGY_GROUPS.has(group)) return project === 'ecology';
+  if (ECOLOGY_GROUPS.has(group)) {
+    return project === 'aquarium' || project === 'ecology';
+  }
   if (CAPTURE_GROUPS.has(group)) return true;
   return group !== '项目';
 }
@@ -708,7 +710,7 @@ export function createExperimentDebug({
     const population = metrics.population
       .map((item) => {
         const ecology =
-          metrics.project === 'ecology'
+          metrics.project === 'ecology' || metrics.project === 'aquarium'
             ? ` E=${(item.averageEnergy * 100).toFixed(0)}% dead=${item.deaths.captured}/${item.deaths.starved}`
             : '';
         return `${item.name} ${item.alive}/${item.target} size=${item.size.toFixed(2)} r=${item.neighborRadius.toFixed(3)}${ecology}`;
@@ -729,8 +731,14 @@ export function createExperimentDebug({
       `${population}\n\n体型派生关系（行作用于列）\n${matrix}` +
       `${capture ? `\n${capture}` : ''}` +
       `${
-        metrics.project === 'ecology'
-          ? `\n\nplankton=${metrics.ecology.plankton.level.toFixed(1)}/${metrics.ecology.plankton.capacity.toFixed(0)} consumed=${metrics.ecology.plankton.consumed.toFixed(1)}\noutcome=${metrics.ecology.state}${metrics.ecology.winnerName ? ` winner=${metrics.ecology.winnerName}` : ''}`
+        metrics.project === 'ecology' || metrics.project === 'aquarium'
+          ? `
+
+plankton=${metrics.ecology.plankton.level.toFixed(1)}/${metrics.ecology.plankton.capacity.toFixed(0)} consumed=${metrics.ecology.plankton.consumed.toFixed(1)}` +
+            (metrics.project === 'ecology'
+              ? `
+outcome=${metrics.ecology.state}${metrics.ecology.winnerName ? ` winner=${metrics.ecology.winnerName}` : ''}`
+              : '')
           : ''
       }` +
       `\npairs=${metrics.pairCount} sim=${metrics.simulationMs.toFixed(1)}ms render=${metrics.renderFps.toFixed(0)}fps` +
