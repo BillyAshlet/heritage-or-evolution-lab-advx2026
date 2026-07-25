@@ -32,11 +32,19 @@ function bgMarkup(src, className) {
 }
 
 // ── Level configs ──────────────────────────────────────────────────────────
-// Stub values — fill in after parameter tuning is done.
+// Three eras, three intended player moves. Values express the DESIGN
+// INTENT and still need 北辰's balance pass — in particular L2 assumes
+// an edible rival-fish food source that the sim does not have yet.
 const LEVEL_CONFIGS = [
-  { id: 'L1', predatorCount: 1, drainMultiplier: 1.0, duration: 60, winThreshold: 0.50 },
-  { id: 'L2', predatorCount: 3, drainMultiplier: 2.0, duration: 90, winThreshold: 0.45 },
-  { id: 'L3', predatorCount: 0, drainMultiplier: 1.2, duration: 90, winThreshold: 0.50 },
+  // 荒原 · 捕食者在，食物勉强 → 玩家倾向缩体型 / 提耐力。
+  // 活下来一点就算赢：这个时代不承诺体面。
+  { id: 'L1', predatorCount: 2, drainMultiplier: 1.30, duration: 60, winThreshold: 0.25 },
+  // 黄金 · 捕食者少，浮游不够 → 玩家倾向增体型去吃同类。
+  // 阈值最高：这个时代不该死人，死了说明你没跟上。
+  { id: 'L2', predatorCount: 1, drainMultiplier: 1.15, duration: 90, winThreshold: 0.70 },
+  // 后疫情 · 捕食者少且不活跃，食物也少 → 玩家倾向提耐力、蛰伏。
+  // 债在这里到期：L2 调大的体型，在这里养不活。
+  { id: 'L3', predatorCount: 1, drainMultiplier: 1.35, duration: 90, winThreshold: 0.45 },
 ];
 
 const TRAIT_DEFAULTS = { speed: 50, size: 50, stamina: 50 };
@@ -81,14 +89,14 @@ const I18N = {
         cta: '调整参数 →',
       },
       {
-        title: '第二局 · 资源匮乏',
-        story: '掠食者更多了，食物却更少了。\n你上一局的选择已经封印——\n现在，用剩下的自由做出新的判断。',
-        inherit: '两局的选择，已经成为下一代的起点。\n第三局的世界里，有一群和你一模一样的鱼。',
+        title: '这是最好的时代，这是最坏的时代',
+        story: '水既已涨，何以为岸？\n吞咽，膨胀，与来不及计算的重量。',
+        inherit: '两局的选择，已经成为下一代的起点。\n潮水退去时，它们不会问你当时为什么那样选。',
         cta: '调整参数 →',
       },
       {
-        title: '第三局 · 镜中人',
-        story: '这群鱼和你的鱼一模一样——\n它们继承了你在上一局结束时的所有选择。\n你现在面对的，是你自己的遗产。',
+        title: '昔为东海之波臣，今困于车辙之中',
+        story: '水既已涸，何以为继？\n等待，蛰伏，与远水解不了的近渴。',
         inherit: '',
         cta: '确认 →',
       },
@@ -142,14 +150,18 @@ const I18N = {
         cta: 'Adjust Traits →',
       },
       {
-        title: 'Round 2 · Scarce',
-        story: 'More predators. Less food.\nYour previous choices are locked in—\nuse what freedom remains to adapt.',
-        inherit: 'Two rounds of choices, fixed forever.\nIn Round 3, you will meet fish just like yours.',
+        // Dickens, A Tale of Two Cities — the sentence the boom years
+        // used about themselves. English needs no translation here.
+        title: 'It was the best of times, it was the worst of times',
+        story: 'The water has risen. Where, then, is the shore?\nSwallowing, swelling, and weight no one stopped to count.',
+        inherit: 'Two rounds of choices, fixed forever.\nWhen the tide goes out, no one asks why you chose that way.',
         cta: 'Adjust Traits →',
       },
       {
-        title: 'Round 3 · Mirror',
-        story: 'These fish are identical to yours—\nthey carry every choice you made last round.\nYou are now facing your own legacy.',
+        // Zhuangzi: a fish stranded in a wheel rut begs for a pint of
+        // water, saying it was once a subject of the Eastern Sea.
+        title: 'Once a subject of the Eastern Sea — now stranded in a wheel rut',
+        story: 'The water has dried. What, then, carries on?\nWaiting, lying low, and distant rivers that cannot wet a near thirst.',
         inherit: '',
         cta: 'Confirm →',
       },
@@ -365,12 +377,12 @@ function renderTitle() {
         <button class="vo-btn vo-btn--${_lang === 'en' ? 'active' : 'ghost'} vo-lang-btn" data-lang="en">EN</button>
       </div>
       <div class="vo-title__hero">
-        <h1 class="vo-title__name"></h1>
-        <p class="vo-title__sub">${t('subtitle')}</p>
+        <h1 class="vo-title__name" data-fx="letters" data-fx-dir="top" data-fx-delay="60" data-fx-from="100" data-fx-to="900">${t('title')}</h1>
+        <p class="vo-title__sub" data-fx="letters" data-fx-delay="35" data-fx-from="200">${t('subtitle')}</p>
       </div>
       <div class="vo-title__nav">
         <div class="vo-title__side vo-title__side--left">
-          <button class="vo-btn vo-btn--ghost" data-action="settings">${t('settings')}</button>
+          <button class="vo-btn vo-btn--ghost" data-action="settings" data-fx="letters">${t('settings')}</button>
         </div>
         <div class="vo-title__center">
           <div class="vo-title__ring-wrap">
@@ -380,36 +392,19 @@ function renderTitle() {
                 stroke-dasharray="${arcLen} ${gapLen}" />
             </svg>
           </div>
-          <button class="vo-btn vo-btn--primary vo-title__start" data-action="start">
+          <button class="vo-btn vo-btn--primary vo-title__start" data-action="start" data-fx="letters">
             ${t('start')}
           </button>
         </div>
         <div class="vo-title__side vo-title__side--right">
-          <button class="vo-btn vo-btn--ghost" data-action="concept">${t('concept')}</button>
-          <button class="vo-btn vo-btn--ghost" data-action="credits">${t('credits')}</button>
+          <button class="vo-btn vo-btn--ghost" data-action="concept" data-fx="letters">${t('concept')}</button>
+          <button class="vo-btn vo-btn--ghost" data-action="credits" data-fx="letters">${t('credits')}</button>
         </div>
       </div>
     </div>
   `;
 
-  // Animate all title-screen text in, then attach variable proximity to each
-  if (_proximityCleanup) { _proximityCleanup(); _proximityCleanup = null; }
-  const proxTargets = [];
-
-  const titleEl = _overlay.querySelector('.vo-title__name');
-  blurTextAnimate(titleEl, t('title'), { delay: 60, animateBy: 'letters', direction: 'top' });
-  proxTargets.push({ el: titleEl, fromWeight: 100, toWeight: 900, radius: 180 });
-
-  const subEl = _overlay.querySelector('.vo-title__sub');
-  blurTextAnimate(subEl, t('subtitle'), { delay: 35, animateBy: 'letters', direction: 'bottom' });
-  proxTargets.push({ el: subEl, fromWeight: 200, toWeight: 800, radius: 130 });
-
-  _overlay.querySelectorAll('.vo-title__nav .vo-btn').forEach(btn => {
-    blurTextAnimate(btn, btn.textContent.trim(), { delay: 40, animateBy: 'letters', direction: 'bottom' });
-    proxTargets.push({ el: btn, fromWeight: 350, toWeight: 800, radius: 110 });
-  });
-
-  _proximityCleanup = setupVariableProximity(proxTargets);
+  applyTextFx();
 
   _overlay.querySelector('[data-action="start"]').onclick = () => {
     _levelIndex = 0;
@@ -430,12 +425,12 @@ function renderSettings() {
   _overlay.innerHTML = `
     <div class="vo-screen vo-subscreen vo-settings">
       <header class="vo-subscreen__header">
-        <button class="vo-btn vo-btn--back" data-action="back">← ${t('back')}</button>
-        <h2>${t('settings')}</h2>
+        <button class="vo-btn vo-btn--back" data-action="back" data-fx="letters">← ${t('back')}</button>
+        <h2 data-fx="letters" data-fx-from="400" data-fx-to="900">${t('settings')}</h2>
       </header>
       <div class="vo-subscreen__body">
         <div class="vo-settings__row">
-          <span>${t('language')}</span>
+          <span data-fx="letters">${t('language')}</span>
           <div class="vo-lang-toggle">
             <button class="vo-btn ${_lang === 'zh' ? 'vo-btn--active' : 'vo-btn--ghost'}" data-lang="zh">中文</button>
             <button class="vo-btn ${_lang === 'en' ? 'vo-btn--active' : 'vo-btn--ghost'}" data-lang="en">EN</button>
@@ -444,6 +439,7 @@ function renderSettings() {
       </div>
     </div>
   `;
+  applyTextFx();
   _overlay.querySelector('[data-action="back"]').onclick = () => go('TITLE', 'cw');
   _overlay.querySelectorAll('[data-lang]').forEach(btn => {
     btn.onclick = () => { _lang = btn.dataset.lang; renderSettings(); };
@@ -454,14 +450,15 @@ function renderConcept() {
   _overlay.innerHTML = `
     <div class="vo-screen vo-subscreen">
       <header class="vo-subscreen__header">
-        <button class="vo-btn vo-btn--back" data-action="back">← ${t('back')}</button>
-        <h2>${t('conceptTitle')}</h2>
+        <button class="vo-btn vo-btn--back" data-action="back" data-fx="letters">← ${t('back')}</button>
+        <h2 data-fx="letters" data-fx-from="400" data-fx-to="900">${t('conceptTitle')}</h2>
       </header>
       <div class="vo-subscreen__body">
-        <p class="vo-body-text">${nl2br(t('conceptBody'))}</p>
+        <p class="vo-body-text" data-fx="words" data-fx-from="300" data-fx-to="700">${nl2br(t('conceptBody'))}</p>
       </div>
     </div>
   `;
+  applyTextFx();
   _overlay.querySelector('[data-action="back"]').onclick = () => go('TITLE', 'ccw');
 }
 
@@ -469,20 +466,21 @@ function renderCredits() {
   _overlay.innerHTML = `
     <div class="vo-screen vo-subscreen">
       <header class="vo-subscreen__header">
-        <button class="vo-btn vo-btn--back" data-action="back">← ${t('back')}</button>
-        <h2>${t('creditsTitle')}</h2>
+        <button class="vo-btn vo-btn--back" data-action="back" data-fx="letters">← ${t('back')}</button>
+        <h2 data-fx="letters" data-fx-from="400" data-fx-to="900">${t('creditsTitle')}</h2>
       </header>
       <div class="vo-subscreen__body">
-        <p class="vo-body-text">${nl2br(t('creditsBody'))}</p>
+        <p class="vo-body-text" data-fx="words" data-fx-from="300" data-fx-to="700">${nl2br(t('creditsBody'))}</p>
       </div>
     </div>
   `;
+  applyTextFx();
   _overlay.querySelector('[data-action="back"]').onclick = () => go('TITLE', 'ccw');
 }
 
 function renderCutscene() {
   const backBtn = _levelIndex === 0
-    ? `<button class="vo-btn vo-btn--back vo-cutscene__back" data-action="back">← ${t('back')}</button>`
+    ? `<button class="vo-btn vo-btn--back vo-cutscene__back" data-action="back" data-fx="letters">← ${t('back')}</button>`
     : '';
 
   const bgHtml = bgMarkup(LEVEL_BG[_levelIndex], 'vo-cutscene__bg');
@@ -492,15 +490,16 @@ function renderCutscene() {
       ${bgHtml}
       ${backBtn}
       <div class="vo-cutscene__content">
-        <p class="vo-cutscene__level-tag">0${_levelIndex + 1} / 03</p>
-        <h2 class="vo-cutscene__title">${levelT('title')}</h2>
-        <p class="vo-cutscene__story">${nl2br(levelT('story'))}</p>
+        <p class="vo-cutscene__level-tag" data-fx="letters" data-fx-delay="30">0${_levelIndex + 1} / 03</p>
+        <h2 class="vo-cutscene__title" data-fx="letters" data-fx-dir="top" data-fx-from="300" data-fx-to="900">${levelT('title')}</h2>
+        <p class="vo-cutscene__story" data-fx="words" data-fx-from="300" data-fx-to="700">${nl2br(levelT('story'))}</p>
       </div>
-      <button class="vo-btn vo-btn--primary vo-cutscene__cta" data-action="continue">
+      <button class="vo-btn vo-btn--primary vo-cutscene__cta" data-action="continue" data-fx="letters">
         ${levelT('cta')}
       </button>
     </div>
   `;
+  applyTextFx();
   _overlay.querySelector('[data-action="continue"]').onclick = openTuning;
   if (_levelIndex === 0) {
     _overlay.querySelector('[data-action="back"]').onclick = () => go('TITLE', 'ccw');
@@ -514,7 +513,7 @@ function renderTuning() {
     return `
       <div class="vo-trait ${locked ? 'vo-trait--locked' : ''}" data-trait="${key}">
         <div class="vo-trait__header">
-          <span class="vo-trait__name">${t('traits.' + key)}</span>
+          <span class="vo-trait__name" data-fx="letters" data-fx-from="400">${t('traits.' + key)}</span>
           ${locked ? `<span class="vo-trait__lock">${t('locked')}</span>` : ''}
           <span class="vo-trait__value" id="vo-val-${key}">${_playerTraits[key]}</span>
         </div>
@@ -525,7 +524,7 @@ function renderTuning() {
           data-trait="${key}"
           ${locked ? 'disabled' : ''}
         />
-        <p class="vo-trait__hint">${t('traitHints.' + key)}</p>
+        <p class="vo-trait__hint" data-fx="words" data-fx-from="300" data-fx-to="650">${t('traitHints.' + key)}</p>
       </div>
     `;
   }).join('');
@@ -533,16 +532,18 @@ function renderTuning() {
   _overlay.innerHTML = `
     <div class="vo-tuning" data-level="${_levelIndex}">
       <div class="vo-tuning__header">
-        <span class="vo-level-tag">0${_levelIndex + 1} / 03</span>
-        <h2 class="vo-tuning__title">${levelT('title')}</h2>
+        <span class="vo-level-tag" data-fx="letters" data-fx-delay="30">0${_levelIndex + 1} / 03</span>
+        <h2 class="vo-tuning__title" data-fx="letters" data-fx-from="400" data-fx-to="900">${levelT('title')}</h2>
         <span class="vo-preview-badge">${t('preview')}</span>
       </div>
       <div class="vo-traits">${slidersHtml}</div>
-      <button class="vo-btn vo-btn--primary vo-tuning__confirm" data-action="confirm">
+      <button class="vo-btn vo-btn--primary vo-tuning__confirm" data-action="confirm" data-fx="letters">
         ${t('confirm')}
       </button>
     </div>
   `;
+
+  applyTextFx();
 
   _overlay.querySelectorAll('.vo-slider').forEach(slider => {
     slider.oninput = () => {
@@ -606,26 +607,27 @@ function renderVerdict() {
 
   _overlay.innerHTML = `
     <div class="vo-screen vo-verdict ${v.won ? 'vo-verdict--win' : 'vo-verdict--lose'}">
-      <div class="vo-verdict__result">${v.won ? t('win') : t('lose')}</div>
+      <div class="vo-verdict__result" data-fx="letters" data-fx-dir="top" data-fx-delay="60" data-fx-from="300" data-fx-to="900">${v.won ? t('win') : t('lose')}</div>
       <div class="vo-verdict__stats">
         <div class="vo-stat">
-          <span class="vo-stat__value">${pct}%</span>
-          <span class="vo-stat__label">${t('survived')}</span>
+          <span class="vo-stat__value" data-fx="letters" data-fx-from="400" data-fx-to="900">${pct}%</span>
+          <span class="vo-stat__label" data-fx="letters">${t('survived')}</span>
         </div>
         <div class="vo-stat">
-          <span class="vo-stat__value">${v.eaten}</span>
-          <span class="vo-stat__label">${t('eaten')}</span>
+          <span class="vo-stat__value" data-fx="letters" data-fx-from="400" data-fx-to="900">${v.eaten}</span>
+          <span class="vo-stat__label" data-fx="letters">${t('eaten')}</span>
         </div>
         <div class="vo-stat">
-          <span class="vo-stat__value">${v.starved}</span>
-          <span class="vo-stat__label">${t('starved')}</span>
+          <span class="vo-stat__value" data-fx="letters" data-fx-from="400" data-fx-to="900">${v.starved}</span>
+          <span class="vo-stat__label" data-fx="letters">${t('starved')}</span>
         </div>
       </div>
-      <button class="vo-btn vo-btn--primary" data-action="next">
+      <button class="vo-btn vo-btn--primary" data-action="next" data-fx="letters">
         ${isLast ? t('finish') : t('nextRound')} →
       </button>
     </div>
   `;
+  applyTextFx();
   _overlay.querySelector('[data-action="next"]').onclick = advanceLevel;
 }
 
@@ -636,14 +638,15 @@ function renderInherit() {
   _overlay.innerHTML = `
     <div class="vo-screen vo-inherit" data-level="${_levelIndex}">
       <div class="vo-inherit__content">
-        <p class="vo-inherit__message">${nl2br(levelT('inherit') || '')}</p>
-        ${lockedNames ? `<p class="vo-inherit__locked">${lockedNames}</p>` : ''}
+        <p class="vo-inherit__message" data-fx="words" data-fx-from="300" data-fx-to="700">${nl2br(levelT('inherit') || '')}</p>
+        ${lockedNames ? `<p class="vo-inherit__locked" data-fx="letters" data-fx-from="400" data-fx-to="900">${lockedNames}</p>` : ''}
       </div>
-      <button class="vo-btn vo-btn--primary" data-action="next">
+      <button class="vo-btn vo-btn--primary" data-action="next" data-fx="letters">
         ${_lang === 'zh' ? '进入下一局 →' : 'Next Round →'}
       </button>
     </div>
   `;
+  applyTextFx();
   _overlay.querySelector('[data-action="next"]').onclick = startLevel;
 }
 
@@ -651,60 +654,186 @@ function renderEnd() {
   _overlay.innerHTML = `
     <div class="vo-screen vo-end">
       <div class="vo-end__content">
-        <h2 class="vo-end__title">${t('endTitle')}</h2>
-        <p class="vo-end__body">${nl2br(t('endBody'))}</p>
+        <h2 class="vo-end__title" data-fx="letters" data-fx-dir="top" data-fx-delay="50" data-fx-from="300" data-fx-to="900">${t('endTitle')}</h2>
+        <p class="vo-end__body" data-fx="words" data-fx-from="300" data-fx-to="700">${nl2br(t('endBody'))}</p>
       </div>
-      <button class="vo-btn vo-btn--ghost" data-action="restart">${t('restart')}</button>
+      <button class="vo-btn vo-btn--ghost" data-action="restart" data-fx="letters">${t('restart')}</button>
     </div>
   `;
+  applyTextFx();
   _overlay.querySelector('[data-action="restart"]').onclick = () => go('TITLE', 'ccw');
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────
-// Variable font weight driven by mouse proximity (replicates Variable Proximity effect).
-// Each letter span's 'wght' axis is interpolated: fromWeight (far) → toWeight (near cursor).
-// Accepts one element or an array of { el, fromWeight, toWeight, radius } targets.
+// Ring-cursor text effect (asmobius.co.jp style):
+//   inside the ring  → variable font weight swells toward the cursor center
+//   outside the ring → letters get pushed away in a wave that fades with distance
+// All values are damped in a rAF loop for the fluid follow feel.
+const FX_RING_RADIUS = 90;   // px — weight zone; also the visible ring's radius
+const FX_PUSH_REACH  = 3;    // push wave dies out at RADIUS * FX_PUSH_REACH
+const FX_MAX_PUSH    = 12;   // px — peak displacement of the push wave
+const FX_DAMP        = 0.16; // per-frame lerp factor for span weight/offset
+const FX_FOLLOW      = 0.18; // per-frame lerp factor for the ring position
+
 function setupVariableProximity(targets, {
   fromWeight = 100,
   toWeight   = 900,
-  radius     = 180,   // px — effect reach
 } = {}) {
   const list = (Array.isArray(targets) ? targets : [{ el: targets }])
-    .map(tgt => ({ fromWeight, toWeight, radius, ...tgt }));
+    .map(tgt => ({
+      fromWeight, toWeight, ...tgt,
+      spans: [...tgt.el.querySelectorAll('.vo-blur-word')],
+    }));
+
+  // Visible ring that trails the cursor
+  const ring = document.createElement('div');
+  ring.className = 'vo-cursor-ring';
+  ring.style.width = ring.style.height = `${FX_RING_RADIUS * 2}px`;
+  _overlay.appendChild(ring);
+
+  const mouse  = { x: 0, y: 0 };
+  const cursor = { x: 0, y: 0 };
+  let hasMouse = false;
 
   function onMove(e) {
-    for (const { el, fromWeight: fw, toWeight: tw, radius: rad } of list) {
-      if (!el.isConnected) continue;
-      el.querySelectorAll('.vo-blur-word').forEach(span => {
-        const r = span.getBoundingClientRect();
-        const dist = Math.hypot(
-          e.clientX - (r.left + r.width  / 2),
-          e.clientY - (r.top  + r.height / 2)
-        );
-        const proximity = Math.max(0, 1 - dist / rad);
-        // sqrt easing — feels more snappy near the cursor
-        const w = Math.round(fw + (tw - fw) * Math.sqrt(proximity));
-        span.style.fontVariationSettings = `'wght' ${w}`;
-      });
-    }
+    if (!hasMouse) { cursor.x = e.clientX; cursor.y = e.clientY; }
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    hasMouse = true;
   }
   window.addEventListener('mousemove', onMove);
-  return () => window.removeEventListener('mousemove', onMove);
+
+  let raf = requestAnimationFrame(function frame() {
+    raf = requestAnimationFrame(frame);
+    if (!hasMouse) return;
+
+    cursor.x += (mouse.x - cursor.x) * FX_FOLLOW;
+    cursor.y += (mouse.y - cursor.y) * FX_FOLLOW;
+    ring.style.transform = `translate(${cursor.x - FX_RING_RADIUS}px, ${cursor.y - FX_RING_RADIUS}px)`;
+    ring.classList.add('vo-cursor-ring--on');
+
+    for (const { el, fromWeight: fw, toWeight: tw, spans } of list) {
+      if (!el.isConnected) continue;
+      for (const span of spans) {
+        const st = span._fx ?? (span._fx = { w: fw, tx: 0, ty: 0 });
+        const r  = span.getBoundingClientRect();
+        // subtract our own offset → resting center (no feedback loop)
+        const dx   = (r.left + r.width  / 2 - st.tx) - cursor.x;
+        const dy   = (r.top  + r.height / 2 - st.ty) - cursor.y;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        let wT = fw, txT = 0, tyT = 0;
+        if (dist <= FX_RING_RADIUS) {
+          // sqrt easing — snappier swell near the center
+          wT = fw + (tw - fw) * Math.sqrt(1 - dist / FX_RING_RADIUS);
+        } else if (dist < FX_RING_RADIUS * FX_PUSH_REACH) {
+          // arch-shaped wave: 0 at the ring edge → peak → 0 at the outer reach
+          const t    = (dist - FX_RING_RADIUS) / (FX_RING_RADIUS * (FX_PUSH_REACH - 1));
+          const push = FX_MAX_PUSH * Math.sin(Math.PI * (1 - t));
+          txT = (dx / dist) * push;
+          tyT = (dy / dist) * push;
+        }
+
+        st.w  += (wT  - st.w)  * FX_DAMP;
+        st.tx += (txT - st.tx) * FX_DAMP;
+        st.ty += (tyT - st.ty) * FX_DAMP;
+
+        span.style.fontVariationSettings = `'wght' ${Math.round(st.w)}`;
+        // Wait for the blur-in animation to release its transform first
+        if (span.dataset.fxSettled) {
+          span.style.transform = `translate(${st.tx.toFixed(2)}px, ${st.ty.toFixed(2)}px)`;
+        }
+      }
+    }
+  });
+
+  return () => {
+    cancelAnimationFrame(raf);
+    window.removeEventListener('mousemove', onMove);
+    ring.remove();
+  };
 }
-// Splits text into word/letter spans, each with a staggered animation-delay.
-function blurTextAnimate(el, text, {
-  delay     = 150,   // ms between each word
-  animateBy = 'words',
-  direction = 'top',
+// Splits an element's existing text (preserving <br> and nested elements) into
+// staggered blur-in spans — letters or words — for the BlurText entrance.
+function blurSplitElement(el, {
+  delay      = 40,        // ms between each segment
+  animateBy  = 'letters',
+  direction  = 'bottom',
+  baseWeight = null,      // idle 'wght' — matches the proximity floor
 } = {}) {
-  const segments = animateBy === 'words' ? text.split(' ') : text.split('');
   const dirClass = direction === 'top' ? 'vo-blur--from-top' : 'vo-blur--from-bottom';
-  el.innerHTML = segments.map((seg, i) => {
-    const spacer = (animateBy === 'words' && i < segments.length - 1) ? ' ' : '';
-    return `<span class="vo-blur-word ${dirClass}" style="animation-delay:${i * delay}ms">${
-      seg === ' ' ? ' ' : seg
-    }${spacer}</span>`;
-  }).join('');
+  let i = 0;
+  const makeSpan = (content) => {
+    const span = document.createElement('span');
+    span.className = `vo-blur-word ${dirClass}`;
+    span.style.animationDelay = `${i * delay}ms`;
+    if (baseWeight != null) span.style.fontVariationSettings = `'wght' ${baseWeight}`;
+    span.textContent = content;
+    // Once the blur-in ends, release the CSS animation (fill:forwards would
+    // otherwise override inline transforms) so the push effect can take over.
+    span.addEventListener('animationend', () => {
+      span.style.animation = 'none';
+      span.style.opacity   = '1';
+      // Pin the settled position. Without this the class's base
+      // transform (translateY(±30px)) takes over the moment the
+      // animation is released, and the text sits 30px off until the
+      // proximity loop writes a transform — which it never does until
+      // the mouse first moves. Booth projector / VR = no mouse = stuck.
+      span.style.transform = 'translate(0px, 0px)';
+      span.dataset.fxSettled = '1';
+    }, { once: true });
+    i++;
+    return span;
+  };
+  const process = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const frag = document.createDocumentFragment();
+      if (animateBy === 'words') {
+        for (const seg of node.textContent.split(/(\s+)/)) {
+          if (!seg) continue;
+          if (/^\s+$/.test(seg)) frag.appendChild(document.createTextNode(' '));
+          else frag.appendChild(makeSpan(seg));
+        }
+      } else {
+        // Collapse template indentation, trim edges, keep in-word spaces as nbsp
+        const chars = [...node.textContent.replace(/\s+/g, ' ')];
+        while (chars[0] === ' ') chars.shift();
+        while (chars.at(-1) === ' ') chars.pop();
+        for (const ch of chars) frag.appendChild(makeSpan(ch === ' ' ? '\u00a0' : ch));
+      }
+      node.replaceWith(frag);
+    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'BR') {
+      [...node.childNodes].forEach(process);
+    }
+  };
+  [...el.childNodes].forEach(process);
+}
+
+// Scans the current screen for [data-fx] elements: splits their text into
+// blur-in spans and wires the shared ring-cursor effect for all of them.
+// data-fx        = 'letters' | 'words'
+// data-fx-dir    = 'top' | 'bottom'         (default bottom)
+// data-fx-delay  = stagger ms               (default 40 letters / 18 words)
+// data-fx-from / data-fx-to = weight range inside the ring
+function applyTextFx() {
+  if (_proximityCleanup) { _proximityCleanup(); _proximityCleanup = null; }
+  const targets = [];
+  _overlay.querySelectorAll('[data-fx]').forEach(el => {
+    const animateBy  = el.dataset.fx === 'words' ? 'words' : 'letters';
+    const fromWeight = Number(el.dataset.fxFrom ?? 350);
+    blurSplitElement(el, {
+      animateBy,
+      delay:      Number(el.dataset.fxDelay ?? (animateBy === 'words' ? 18 : 40)),
+      direction:  el.dataset.fxDir ?? 'bottom',
+      baseWeight: fromWeight,
+    });
+    targets.push({
+      el,
+      fromWeight,
+      toWeight: Number(el.dataset.fxTo ?? 800),
+    });
+  });
+  if (targets.length) _proximityCleanup = setupVariableProximity(targets);
 }
 function nl2br(str) {
   return String(str).replace(/\n/g, '<br>');
@@ -756,4 +885,18 @@ export function mountVisitorMode() {
   window.addEventListener('keyup', (e) => {
     // intentionally empty — TimeShortcutController handles its own keyup
   }, { capture: true });
+
+  // Dev hook: jump straight to a level's cutscene without playing the
+  // rounds before it. Lets 三金 preview L2/L3 dressing and copy in two
+  // seconds instead of 2.5 minutes. Console: downstream.cutscene(1)
+  window.downstream = {
+    // Goes through go() on purpose: it tears down the previous screen's
+    // proximity loop. Rendering directly leaves the blur-in spans stuck
+    // at their translateY(30px) start offset.
+    cutscene(index) {
+      _levelIndex = Math.max(0, Math.min(LEVEL_CONFIGS.length - 1, index));
+      go('CUTSCENE');
+    },
+    setLang(lang) { _lang = lang; go(_screen, null); },
+  };
 }
