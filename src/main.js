@@ -28,6 +28,7 @@ import {
   createGameLevelConfig,
 } from './game-mode.js';
 import { GameUI } from './game-ui.js';
+import { mountVisitorMode } from './visitor-mode.js';
 
 const startup = document.getElementById('startup-status');
 const app = document.getElementById('app');
@@ -195,6 +196,8 @@ async function bootstrap() {
   });
   let debug = null;
   let gameUI = null;
+  let visitorUI = null;
+  let gameUiRevealed = false;
   let timeShortcuts = null;
   let lastPresentedProject = null;
   let lastGameUiUpdate = -Infinity;
@@ -272,7 +275,9 @@ async function bootstrap() {
       report?.survivors ?? player?.alive ?? level.playerFish.count;
     const rawTimeRemaining = level.durationSec - metrics.elapsed;
     return {
-      active: current.runtime.project === 'game',
+      active:
+        current.runtime.project === 'game' &&
+        gameUiRevealed,
       phase: gameSession.phase,
       levelIndex: gameSession.levelIndex,
       levelCount: LEVEL_SPECS.length,
@@ -302,7 +307,10 @@ async function bootstrap() {
 
   function renderGameUi(nowMs = performance.now(), force = false) {
     if (!gameUI) return;
-    if (current.runtime.project !== 'game') {
+    if (
+      current.runtime.project !== 'game' ||
+      !gameUiRevealed
+    ) {
       gameUI.render({ active: false });
       return;
     }
@@ -314,14 +322,15 @@ async function bootstrap() {
   function syncProjectPresentation(force = false) {
     const project = current.runtime.project;
     const isGame = project === 'game';
+    const visitorBlocking = visitorUI?.blocking ?? false;
     app.dataset.project = project;
     if (isGame) {
       app.dataset.gameAttemptSeed = String(current.runtime.seed);
     } else {
       delete app.dataset.gameAttemptSeed;
     }
-    timeShortcuts?.setEnabled(!isGame);
-    cameraController.setInteractionEnabled(!isGame);
+    timeShortcuts?.setEnabled(!isGame && !visitorBlocking);
+    cameraController.setInteractionEnabled(!isGame && !visitorBlocking);
     simulation.setLocomotionPreview(
       isGame && gameSession.phase === GAME_PHASE.TUNING
     );
@@ -496,6 +505,36 @@ async function bootstrap() {
     renderGameUi(performance.now(), true);
   }
 
+  function beginVisitorExperience() {
+    gameUiRevealed = false;
+    gameSession.restart();
+    installGameScene({ newAttempt: true });
+  }
+
+  function revealVisitorLevel(levelIndex) {
+    if (
+      gameSession.phase !== GAME_PHASE.TUNING ||
+      levelIndex !== gameSession.levelIndex
+    ) {
+      throw new Error('过场年代与当前游戏关卡不同步。');
+    }
+    gameUiRevealed = true;
+    syncProjectPresentation(true);
+  }
+
+  function returnToVisitorTitle() {
+    gameUiRevealed = false;
+    if (
+      current.runtime.project === 'game' &&
+      gameSession.phase !== GAME_PHASE.RUNNING
+    ) {
+      stage.runtime.project = 'aquarium';
+      controller.applyConfig('rebuildScene', 'runtime.project');
+      debug.rebuildPane();
+    }
+    syncProjectPresentation(true);
+  }
+
   gameUI = new GameUI({
     root: document.getElementById('game-ui-root'),
     onTriangleInput: updateTriangleSelection,
@@ -518,6 +557,7 @@ async function bootstrap() {
     onRetry() {
       if (gameSession.phase !== GAME_PHASE.VERDICT) return;
       gameSession.retryLevel();
+      gameUiRevealed = true;
       installGameScene();
     },
     onContinue() {
@@ -528,24 +568,42 @@ async function bootstrap() {
         return;
       }
       if (gameSession.phase !== GAME_PHASE.INHERIT) return;
+      gameUiRevealed = false;
       gameSession.advanceLevel();
       if (gameSession.phase === GAME_PHASE.COMPLETE) {
         renderGameUi(performance.now(), true);
+        visitorUI?.showEnd();
       } else {
+        visitorUI?.showCutscene(gameSession.levelIndex);
         installGameScene();
       }
     },
     onRestart() {
+      gameUiRevealed = false;
       gameSession.restart();
+      visitorUI?.showCutscene(0);
       installGameScene();
     },
     onExit() {
       // Exiting during RUNNING would discard the attempt's only live report.
       if (gameSession.phase === GAME_PHASE.RUNNING) return;
+      gameUiRevealed = false;
       stage.runtime.project = 'aquarium';
       controller.applyConfig('rebuildScene', 'runtime.project');
       debug.rebuildPane();
       renderGameUi(performance.now(), true);
+      visitorUI?.showTitle();
+    },
+  });
+
+  visitorUI = mountVisitorMode({
+    root: app,
+    levels: LEVEL_SPECS,
+    onBeginExperience: beginVisitorExperience,
+    onEnterLevel: revealVisitorLevel,
+    onReturnToTitle: returnToVisitorTitle,
+    onScreenChange() {
+      syncProjectPresentation(true);
     },
   });
   syncProjectPresentation(true);
