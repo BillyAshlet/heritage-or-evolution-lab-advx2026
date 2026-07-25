@@ -164,6 +164,42 @@ function roleLabel(relations = []) {
   return '同级群体';
 }
 
+export function buildRadiusMonitorModel(metrics) {
+  const population = metrics?.population ?? [];
+  const matrix = metrics?.relationMatrix ?? [];
+  return population.map((school, schoolIndex) => {
+    const huntTargets = (matrix[schoolIndex] ?? [])
+      .map((relation, targetIndex) =>
+        relation === 'pursuit' ? population[targetIndex]?.name : null
+      )
+      .filter(Boolean);
+    const threatSources = matrix
+      .map((row, sourceIndex) =>
+        row?.[schoolIndex] === 'pursuit'
+          ? population[sourceIndex]?.name
+          : null
+      )
+      .filter(Boolean);
+    return {
+      id: school.id,
+      name: school.name,
+      color: school.color,
+      boid: {
+        separation: school.separationRadius,
+        alignment: school.alignmentRadius,
+        cohesion: school.cohesionRadius,
+      },
+      combat: {
+        hunt: huntTargets.length ? school.detectionLength : null,
+        burst: huntTargets.length ? school.burstRadius : null,
+        panic: threatSources.length ? school.panicRadius : null,
+        huntTargets,
+        threatSources,
+      },
+    };
+  });
+}
+
 function groupVisible(project, group) {
   if (MAP_GROUPS.has(group) || group.startsWith('障碍 ·')) {
     return project === 'obstacle';
@@ -198,10 +234,137 @@ export function createExperimentDebug({
     <pre id="experiment-metrics">…</pre>
   `;
   document.getElementById('app').appendChild(dashboard);
+  const radiusMonitors = document.createElement('aside');
+  radiusMonitors.id = 'radius-monitors';
+  radiusMonitors.setAttribute('aria-label', '鱼群实时作用半径');
+  radiusMonitors.innerHTML = `
+    <section class="radius-monitor">
+      <header>
+        <span>BOID RADII</span>
+        <strong>同群三力半径</strong>
+      </header>
+      <div id="boid-radius-monitor"></div>
+    </section>
+    <section class="radius-monitor radius-monitor-combat">
+      <header>
+        <span>COMBAT RADII</span>
+        <strong>捕食 / 被捕食</strong>
+      </header>
+      <div id="combat-radius-monitor"></div>
+    </section>
+  `;
+  document.getElementById('app').appendChild(radiusMonitors);
   const dashboardKind = dashboard.querySelector('#dashboard-kind');
   const stateLabel = dashboard.querySelector('#probe-state');
   const metricsText = dashboard.querySelector('#experiment-metrics');
+  const boidRadiusMonitor = radiusMonitors.querySelector(
+    '#boid-radius-monitor'
+  );
+  const combatRadiusMonitor = radiusMonitors.querySelector(
+    '#combat-radius-monitor'
+  );
   let lastUpdate = 0;
+
+  function radiusValue(value) {
+    return Number.isFinite(value) ? value.toFixed(3) : '—';
+  }
+
+  function appendRadiusBar(parent, label, value, maximum) {
+    const item = document.createElement('span');
+    item.className = 'radius-reading';
+    const name = document.createElement('small');
+    name.textContent = label;
+    const output = document.createElement('b');
+    output.textContent = radiusValue(value);
+    const track = document.createElement('i');
+    const fill = document.createElement('i');
+    const ratio =
+      Number.isFinite(value) && maximum > 0
+        ? Math.max(0, Math.min(1, value / maximum))
+        : 0;
+    fill.style.setProperty('--radius-fill', `${ratio * 100}%`);
+    track.appendChild(fill);
+    item.append(name, output, track);
+    parent.appendChild(item);
+  }
+
+  function createRadiusRow(school, maximum, kind) {
+    const row = document.createElement('article');
+    row.className = 'radius-monitor-row';
+    const heading = document.createElement('div');
+    heading.className = 'radius-monitor-school';
+    const swatch = document.createElement('i');
+    swatch.style.background = school.color || '#7197ad';
+    const name = document.createElement('strong');
+    name.textContent = school.name;
+    heading.append(swatch, name);
+    row.appendChild(heading);
+
+    const readings = document.createElement('div');
+    readings.className = 'radius-monitor-readings';
+    if (kind === 'boid') {
+      appendRadiusBar(
+        readings,
+        '分离 S',
+        school.boid.separation,
+        maximum
+      );
+      appendRadiusBar(
+        readings,
+        '对齐 A',
+        school.boid.alignment,
+        maximum
+      );
+      appendRadiusBar(
+        readings,
+        '凝聚 C',
+        school.boid.cohesion,
+        maximum
+      );
+    } else {
+      appendRadiusBar(readings, '捕猎 H', school.combat.hunt, maximum);
+      appendRadiusBar(
+        readings,
+        '爆发 B',
+        school.combat.burst,
+        maximum
+      );
+      appendRadiusBar(
+        readings,
+        '逃逸 P',
+        school.combat.panic,
+        maximum
+      );
+      const targets = document.createElement('p');
+      targets.textContent =
+        `吃 → ${school.combat.huntTargets.join('、') || '无'} · ` +
+        `逃 ← ${school.combat.threatSources.join('、') || '无'}`;
+      row.appendChild(targets);
+    }
+    row.appendChild(readings);
+    return row;
+  }
+
+  function updateRadiusMonitors(metrics) {
+    const model = buildRadiusMonitorModel(metrics);
+    const maximum = Math.max(
+      0,
+      ...model.flatMap((school) => [
+        ...Object.values(school.boid),
+        ...Object.values(school.combat).filter(Number.isFinite),
+      ])
+    );
+    boidRadiusMonitor.replaceChildren(
+      ...model.map((school) =>
+        createRadiusRow(school, maximum, 'boid')
+      )
+    );
+    combatRadiusMonitor.replaceChildren(
+      ...model.map((school) =>
+        createRadiusRow(school, maximum, 'combat')
+      )
+    );
+  }
 
   function projectMeta() {
     return (
@@ -697,6 +860,7 @@ export function createExperimentDebug({
     }
     stateLabel.textContent = stateText;
     updateSelectedSchool(metrics);
+    updateRadiusMonitors(metrics);
     const matrix = metrics.relationMatrix
       .map(
         (row, index) =>
@@ -746,6 +910,7 @@ export function createExperimentDebug({
     dispose() {
       pane?.dispose();
       dashboard.remove();
+      radiusMonitors.remove();
     },
     get pane() {
       return pane;

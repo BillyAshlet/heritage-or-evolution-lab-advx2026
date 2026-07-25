@@ -10,6 +10,8 @@
   `@dimforge/rapier3d-compat@0.19.3`。
 - 不引入 Godot、Electron、Tauri 或任何桌面套壳。
 - 默认三群数量为小/中/大 `400/200/40`。
+- 主水族馆默认缸体为 `6.0 × 3.6 × 2.4`；障碍和生态子实验继续使用
+  各自独立预设。
 - 页面分为主水族馆、地图刚体和生态淘汰三个项目上下文。子实验不得反向
   修改主水族馆的默认生物规则。营养级联及其 holding/判据已删除。
 - 提供 `200/80/20` 的 300 条性能预设；手工改数量进入 Custom，不偷偷
@@ -48,7 +50,7 @@ neighborRadius = max(rawRadius, minNeighborRadiusFactor × visualLength)
 ```
 
 凝聚、对齐、分离、威胁探测半径分别是邻域半径的
-`1 / 0.35 / 0.40 / 0.75` 倍。跨群斥力半径为
+`1 / 0.35 / 0.40 / 0.45` 倍。跨群斥力半径为
 `0.15 × max(sizeA, sizeB)`。空间哈希 cell 使用所有查询半径中的最大值，
 统一查询 `3×3×3` 邻格。
 
@@ -165,8 +167,13 @@ Space 会额外退出 closeup/follow、清除选择并回到全局原视角，�
 
 默认三群的 Boid 权重统一为 separation/alignment/cohesion
 `0.55 / 0.45 / 0.40`，总 steering 上限为 `5.2`。动态半径在默认小群下
-约为 separation/alignment/cohesion `0.126 / 0.110 / 0.314`，与 500 鱼
-参考预设的 `0.12 / 0.106 / 0.30` 保持近似比例，同时仍能随数量和缸体变化。
+约为 separation/alignment/cohesion `0.251 / 0.220 / 0.628`；这是默认缸体
+三个轴均扩大一倍后，由目标邻居密度自动推导的结果。
+
+主界面提供两扇独立只读实时窗口。Boid 窗口按鱼群显示 separation、
+alignment、cohesion 的实际半径；捕食窗口显示 hunt、burst、panic 半径，
+并列出当前体型关系下每群“吃谁 / 躲谁”。两者直接读取模拟 metrics，修改
+数量、体型、目标邻居数或感知倍率后同步更新。
 
 ## 6. 公共调试接口
 

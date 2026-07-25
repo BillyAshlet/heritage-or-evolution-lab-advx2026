@@ -1382,6 +1382,7 @@ export class ExperimentSimulation {
       population: this.config.schools.map((school, index) => ({
         id: school.id,
         name: school.name,
+        color: school.color,
         size: school.size,
         alive: this.aliveCount(index),
         target: this.derived.schools[index].count,

@@ -81,9 +81,9 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
   ],
   tank: {
     preset: 'aquarium',
-    width: 3,
-    height: 1.8,
-    depth: 1.2,
+    width: 6,
+    height: 3.6,
+    depth: 2.4,
     wallMargin: 0.035,
     edgeSoftness: 0.16,
   },
@@ -360,17 +360,17 @@ const scalarEntries = [
   }),
   entry('tank.width', '缸体', 'width', 'rebuildScene', {
     min: 1,
-    max: 6,
+    max: 12,
     step: 0.05,
   }),
   entry('tank.height', '缸体', 'height', 'rebuildScene', {
     min: 0.6,
-    max: 3,
+    max: 7.2,
     step: 0.05,
   }),
   entry('tank.depth', '缸体', 'depth', 'rebuildScene', {
     min: 0.4,
-    max: 2.5,
+    max: 4.8,
     step: 0.05,
   }),
   entry(

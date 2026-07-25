@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   SCHOOL_EMBEDDED_GLOBAL_PATHS,
   SCHOOL_SECTIONS,
+  buildRadiusMonitorModel,
   zoomRangeWindow,
 } from './experiment-debug.js';
 
@@ -74,4 +75,49 @@ test('boid editor keeps each radius control beside its school weight', () => {
       'perception.separationRadiusFactor',
     ].sort()
   );
+});
+
+test('radius monitors expose boid and live directed combat radii', () => {
+  const metrics = {
+    population: [
+      {
+        id: 'small',
+        name: '小群',
+        color: '#48a',
+        separationRadius: 0.25,
+        alignmentRadius: 0.22,
+        cohesionRadius: 0.63,
+        detectionLength: 0.28,
+        panicRadius: 0.28,
+        burstRadius: 0.21,
+      },
+      {
+        id: 'large',
+        name: '大群',
+        color: '#a44',
+        separationRadius: 0.34,
+        alignmentRadius: 0.3,
+        cohesionRadius: 0.85,
+        detectionLength: 0.38,
+        panicRadius: 0.38,
+        burstRadius: 0.29,
+      },
+    ],
+    relationMatrix: [
+      ['peer', 'evade'],
+      ['pursuit', 'peer'],
+    ],
+  };
+  const [small, large] = buildRadiusMonitorModel(metrics);
+  assert.deepEqual(small.boid, {
+    separation: 0.25,
+    alignment: 0.22,
+    cohesion: 0.63,
+  });
+  assert.equal(small.combat.hunt, null);
+  assert.equal(small.combat.panic, 0.28);
+  assert.deepEqual(small.combat.threatSources, ['大群']);
+  assert.equal(large.combat.hunt, 0.38);
+  assert.equal(large.combat.panic, null);
+  assert.deepEqual(large.combat.huntTargets, ['小群']);
 });

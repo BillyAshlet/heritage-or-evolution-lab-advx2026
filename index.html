@@ -316,6 +316,122 @@
         font: 9px/1.45 inherit;
         white-space: pre-wrap;
       }
+      #radius-monitors {
+        position: absolute;
+        top: max(76px, calc(env(safe-area-inset-top) + 62px));
+        left: max(12px, env(safe-area-inset-left));
+        z-index: 4;
+        display: grid;
+        gap: 8px;
+        width: min(360px, calc(100% - 24px));
+        color: var(--lab-ink);
+        pointer-events: none;
+      }
+      .radius-monitor {
+        border: 1px solid rgba(174, 196, 211, 0.94);
+        background: rgba(247, 242, 234, 0.92);
+        box-shadow: inset 3px 0 #7197ad;
+        backdrop-filter: blur(5px);
+      }
+      .radius-monitor-combat {
+        box-shadow: inset 3px 0 #9d514b;
+      }
+      .radius-monitor > header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 9px 5px 11px;
+        border-bottom: 1px solid rgba(174, 196, 211, 0.72);
+      }
+      .radius-monitor > header span {
+        color: var(--lab-muted);
+        font-size: 8px;
+        letter-spacing: 0.13em;
+      }
+      .radius-monitor > header strong {
+        color: #3f5a6d;
+        font-size: 9px;
+        font-weight: 650;
+      }
+      .radius-monitor-row {
+        display: grid;
+        grid-template-columns: 55px 1fr;
+        gap: 4px 8px;
+        padding: 6px 9px 7px 11px;
+      }
+      .radius-monitor-row + .radius-monitor-row {
+        border-top: 1px solid rgba(200, 216, 230, 0.7);
+      }
+      .radius-monitor-school {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .radius-monitor-school i {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 auto;
+        border: 1px solid rgba(77, 100, 119, 0.38);
+      }
+      .radius-monitor-school strong {
+        overflow: hidden;
+        font-size: 9px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .radius-monitor-readings {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 5px;
+      }
+      .radius-reading {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 2px 5px;
+        min-width: 0;
+      }
+      .radius-reading small {
+        overflow: hidden;
+        color: var(--lab-muted);
+        font-size: 7px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .radius-reading b {
+        color: #3f5a6d;
+        font-size: 8px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      .radius-reading > i {
+        position: relative;
+        grid-column: 1 / -1;
+        height: 2px;
+        overflow: hidden;
+        background: rgba(174, 196, 211, 0.42);
+      }
+      .radius-reading > i > i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: var(--radius-fill);
+        background: #7197ad;
+      }
+      .radius-monitor-combat .radius-reading > i > i {
+        background: #a96a63;
+      }
+      .radius-monitor-row > p {
+        grid-column: 2;
+        grid-row: 2;
+        margin: -1px 0 0;
+        overflow: hidden;
+        color: #7b8790;
+        font-size: 7px;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       #fish-inspector {
         position: absolute;
         left: max(12px, env(safe-area-inset-left));
@@ -502,7 +618,16 @@
         opacity: 0;
         transform: translateY(calc(100% + 18px));
       }
+      #app[data-selected-fish] #radius-monitors {
+        opacity: 0;
+        transform: translateX(calc(-100% - 18px));
+      }
       #experiment-dashboard {
+        transition:
+          opacity 180ms ease,
+          transform 220ms ease;
+      }
+      #radius-monitors {
         transition:
           opacity 180ms ease,
           transform 220ms ease;
@@ -511,7 +636,13 @@
           [data-camera-mode="closeup"],
           [data-camera-mode="follow"]
         )
-        :is(#panel-holder, #lab-mark, #experiment-dashboard, #fish-inspector) {
+        :is(
+          #panel-holder,
+          #lab-mark,
+          #experiment-dashboard,
+          #radius-monitors,
+          #fish-inspector
+        ) {
         opacity: 0;
         pointer-events: none;
       }
@@ -544,6 +675,14 @@
         }
         #experiment-dashboard {
           width: min(300px, calc(100% - 16px));
+        }
+        #radius-monitors {
+          top: 8px;
+          left: 8px;
+          width: min(300px, calc(100% - 16px));
+        }
+        .radius-monitor-row {
+          grid-template-columns: 48px 1fr;
         }
         #experiment-dashboard canvas {
           height: 90px;

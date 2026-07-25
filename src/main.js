@@ -62,9 +62,9 @@ function applyProjectPreset(stage) {
   if (stage.runtime.project === 'aquarium') {
     Object.assign(stage.tank, {
       preset: 'aquarium',
-      width: 3,
-      height: 1.8,
-      depth: 1.2,
+      width: 6,
+      height: 3.6,
+      depth: 2.4,
     });
     stage.obstacles.enabled = false;
     stage.runtime.mode = 'steady';

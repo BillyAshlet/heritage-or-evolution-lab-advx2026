@@ -17,15 +17,19 @@ import {
 } from './experiment-model.js';
 import { createDefaultConfig } from './experiment-config.js';
 
-test('default dynamic radii match the 400/200/40 design values', () => {
+test('default aquarium is doubled and dynamic radii follow its density', () => {
   const config = createDefaultConfig();
+  assert.deepEqual(
+    [config.tank.width, config.tank.height, config.tank.depth],
+    [6, 3.6, 2.4]
+  );
   const derived = deriveExperiment(config);
-  assert.ok(Math.abs(derived.schools[0].neighborRadius - 0.314) < 0.002);
-  assert.ok(Math.abs(derived.schools[1].neighborRadius - 0.396) < 0.002);
-  assert.ok(Math.abs(derived.schools[2].neighborRadius - 0.426) < 0.002);
-  assert.ok(Math.abs(derived.schools[0].detectionLength - 0.1413) < 0.002);
-  assert.ok(Math.abs(derived.schools[1].detectionLength - 0.1782) < 0.002);
-  assert.ok(Math.abs(derived.schools[2].detectionLength - 0.1917) < 0.002);
+  assert.ok(Math.abs(derived.schools[0].neighborRadius - 0.628) < 0.002);
+  assert.ok(Math.abs(derived.schools[1].neighborRadius - 0.791) < 0.002);
+  assert.ok(Math.abs(derived.schools[2].neighborRadius - 0.853) < 0.002);
+  assert.ok(Math.abs(derived.schools[0].detectionLength - 0.2826) < 0.002);
+  assert.ok(Math.abs(derived.schools[1].detectionLength - 0.3560) < 0.002);
+  assert.ok(Math.abs(derived.schools[2].detectionLength - 0.3837) < 0.002);
   assert.equal(
     derived.schools[0].panicRadius,
     derived.schools[0].detectionLength
@@ -34,7 +38,7 @@ test('default dynamic radii match the 400/200/40 design values', () => {
 
 test('visual-length lower bound prevents dense configurations from tunneling', () => {
   const config = createDefaultConfig();
-  config.schools[0].count = 2000;
+  config.schools[0].count = 20000;
   config.schools[0].targetNeighbors = 1;
   const derived = deriveExperiment(config).schools[0];
   assert.equal(
