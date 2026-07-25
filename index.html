@@ -223,12 +223,20 @@
         line-height: 1.55;
       }
       .param-btn {
+        appearance: none;
+        border: 0;
+        padding: 0;
+        color: inherit;
+        background: transparent;
+        font: inherit;
+        line-height: 1;
         cursor: pointer;
         opacity: 0.62;
         margin-left: 5px;
         user-select: none;
       }
-      .param-btn:hover {
+      .param-btn:hover,
+      .param-btn:focus-visible {
         opacity: 1;
       }
       #enable-tilt {

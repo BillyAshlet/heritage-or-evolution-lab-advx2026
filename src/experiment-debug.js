@@ -1,9 +1,50 @@
 import { Pane } from 'tweakpane';
 import {
+  createDefaultConfig,
   createParameterRegistry,
   getPath,
   setPath,
 } from './experiment-config.js';
+
+function niceRangeNumber(value) {
+  return Number.parseFloat(value.toPrecision(8));
+}
+
+export function zoomRangeWindow(state, value, factor, limits) {
+  const hardWidth = limits.max - limits.min;
+  const minimumWidth = Math.min(
+    hardWidth,
+    Math.max(limits.step * 2, Number.EPSILON)
+  );
+  const width = Math.max(
+    minimumWidth,
+    Math.min(hardWidth, (state.max - state.min) * factor)
+  );
+  let min = value - width / 2;
+  let max = value + width / 2;
+  if (min < limits.min) {
+    max += limits.min - min;
+    min = limits.min;
+  }
+  if (max > limits.max) {
+    min -= max - limits.max;
+    max = limits.max;
+  }
+  min = Math.max(limits.min, min);
+  max = Math.min(limits.max, max);
+  const precisionStep =
+    limits.step === 1
+      ? 1
+      : Math.min(
+          limits.step,
+          10 ** Math.floor(Math.log10(Math.max(width, Number.EPSILON) / 100))
+        );
+  return {
+    min: niceRangeNumber(min),
+    max: niceRangeNumber(max),
+    step: niceRangeNumber(precisionStep),
+  };
+}
 
 const PROJECTS = {
   aquarium: {
@@ -142,6 +183,8 @@ export function createExperimentDebug({
   let releaseButton = null;
   let roleState = null;
   let roleBindings = [];
+  const rangeWindows = new Map();
+  const defaultConfig = createDefaultConfig();
   const holder = document.getElementById('panel-holder');
   const dashboard = document.createElement('section');
   dashboard.id = 'experiment-dashboard';
@@ -255,6 +298,7 @@ export function createExperimentDebug({
     const actions = root.addFolder({ title: '配置文件', expanded: false });
     actions.addButton({ title: '恢复默认值' }).on('click', () => {
       controller.restoreDefaults();
+      rangeWindows.clear();
       selectedSchoolIndex = 0;
       rebuildPane();
     });
@@ -269,6 +313,7 @@ export function createExperimentDebug({
       if (!text) return;
       try {
         controller.importConfig(text);
+        rangeWindows.clear();
         selectedSchoolIndex = 0;
         rebuildPane();
       } catch (error) {
@@ -285,6 +330,7 @@ export function createExperimentDebug({
       const text = localStorage.getItem('experiment-config-v2');
       if (!text) return;
       controller.importConfig(text);
+      rangeWindows.clear();
       selectedSchoolIndex = 0;
       rebuildPane();
     });
@@ -306,15 +352,41 @@ export function createExperimentDebug({
       (value, part) => value[part],
       controller.stage
     );
-    const options = { label: spec.label };
-    if (spec.min !== undefined) {
-      options.min = spec.min;
-      options.max = spec.max;
-      options.step = spec.step;
+    const isNumeric =
+      typeof parent[key] === 'number' &&
+      spec.min !== undefined &&
+      !spec.options;
+    const initialRange = isNumeric
+      ? { min: spec.min, max: spec.max, step: spec.step }
+      : null;
+    let range = isNumeric
+      ? { ...(rangeWindows.get(spec.path) ?? initialRange) }
+      : null;
+    if (
+      isNumeric &&
+      (parent[key] < range.min || parent[key] > range.max)
+    ) {
+      range = { ...initialRange };
+      rangeWindows.delete(spec.path);
     }
-    if (spec.options) options.options = spec.options;
-    const binding = folder.addBinding(parent, key, options);
-    binding.on('change', (event) => {
+    const configuredDefault = getPath(defaultConfig, spec.path);
+    const defaultValue =
+      configuredDefault === undefined ? parent[key] : configuredDefault;
+    let binding = null;
+
+    function bindingOptions(index) {
+      const options = { label: spec.label };
+      if (isNumeric) {
+        options.min = range.min;
+        options.max = range.max;
+        options.step = range.step;
+      }
+      if (spec.options) options.options = spec.options;
+      if (index !== undefined && index >= 0) options.index = index;
+      return options;
+    }
+
+    function applyChange(event) {
       if (spec.applyMode !== 'live' && !event.last) return;
       try {
         controller.applyConfig(spec.applyMode, spec.path);
@@ -337,9 +409,94 @@ export function createExperimentDebug({
           getPath(controller.current, spec.path)
         );
         window.alert(error.message);
+        if (
+          isNumeric &&
+          (parent[key] < range.min || parent[key] > range.max)
+        ) {
+          range = { ...initialRange };
+          rangeWindows.delete(spec.path);
+          rebuildBinding();
+        } else {
+          binding.refresh();
+        }
+      }
+    }
+
+    function addLabelButton(label, text, title, action) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'param-btn';
+      button.textContent = text;
+      button.title = title;
+      button.setAttribute('aria-label', title);
+      button.addEventListener('pointerdown', (event) => {
+        event.stopPropagation();
+      });
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        action();
+      });
+      label.appendChild(button);
+    }
+
+    function decorate() {
+      const label = binding.element.querySelector('.tp-lblv_l');
+      if (!label) return;
+      label.title = isNumeric
+        ? `当前量程 ${range.min}–${range.max} · 安全范围 ${spec.min}–${spec.max} · 默认 ${defaultValue}`
+        : `默认 ${defaultValue}`;
+      addLabelButton(
+        label,
+        '↺',
+        `恢复默认值 ${defaultValue} 和完整量程`,
+        resetParameter
+      );
+      if (!isNumeric) return;
+      addLabelButton(label, '+', '缩小量程，以当前值为中心', () =>
+        zoom(0.5)
+      );
+      addLabelButton(label, '−', '扩大量程，以当前值为中心', () =>
+        zoom(2)
+      );
+    }
+
+    function attach() {
+      binding.on('change', applyChange);
+      decorate();
+    }
+
+    function rebuildBinding() {
+      const index = folder.children.indexOf(binding);
+      binding?.dispose();
+      binding = folder.addBinding(parent, key, bindingOptions(index));
+      attach();
+    }
+
+    function zoom(factor) {
+      range = zoomRangeWindow(range, parent[key], factor, {
+        min: spec.min,
+        max: spec.max,
+        step: spec.step,
+      });
+      rangeWindows.set(spec.path, range);
+      rebuildBinding();
+    }
+
+    function resetParameter() {
+      parent[key] = defaultValue;
+      if (isNumeric) {
+        range = { ...initialRange };
+        rangeWindows.delete(spec.path);
+        rebuildBinding();
+      } else {
         binding.refresh();
       }
-    });
+      applyChange({ value: parent[key], last: true });
+    }
+
+    binding = folder.addBinding(parent, key, bindingOptions());
+    attach();
     return binding;
   }
 
