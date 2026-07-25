@@ -4,10 +4,10 @@ import * as THREE from 'three';
 import { createDefaultConfig } from './experiment-config.js';
 import { ExperimentSimulation } from './experiment-simulation.js';
 
-function smallSimulation(mode = 'cascade', seed = 1001, withScene = false) {
+function smallSimulation(mode = 'steady', seed = 1001, withScene = false) {
   const config = createDefaultConfig();
   config.runtime.mode = mode;
-  config.runtime.project = mode === 'ecology' ? 'ecology' : 'cascade';
+  config.runtime.project = mode === 'ecology' ? 'ecology' : 'aquarium';
   config.runtime.seed = seed;
   config.physics.enabled = false;
   config.captureVfx.enabled = withScene;
@@ -51,6 +51,16 @@ test('configuration and runtime expose no replenishment mechanism', () => {
   assert.equal('queuedRespawns' in metrics, false);
 });
 
+test('simulation exposes no removed cascade runtime surface', () => {
+  const simulation = smallSimulation();
+  const metrics = simulation.metrics();
+  assert.equal('probe' in simulation, false);
+  assert.equal('releaseHolding' in simulation, false);
+  assert.equal('runBatch' in simulation, false);
+  assert.equal('cascade' in metrics, false);
+  assert.equal('released' in metrics, false);
+});
+
 test('direct threat is proximity-driven even when pursuit target selection loses', () => {
   const simulation = smallSimulation();
   const prey = 0;
@@ -73,17 +83,6 @@ test('direct threat is proximity-driven even when pursuit target selection loses
   assert.equal(simulation.threatCounts[prey], 1);
 });
 
-test('cascade mode cannot capture', () => {
-  const simulation = smallSimulation('cascade');
-  const prey = 0;
-  const predator = simulation.schoolRanges[1].start;
-  simulation.positions.fill(0);
-  simulation.pursuitTargets[predator] = prey;
-  simulation.cooldowns[predator] = 0;
-  simulation._capture(1 / 60);
-  assert.equal(simulation.alive[prey], 1);
-});
-
 test('predation mode captures at visual distance and death stays permanent', () => {
   const simulation = smallSimulation('steady', 1001, true);
   const prey = 0;
@@ -101,9 +100,9 @@ test('predation mode captures at visual distance and death stays permanent', () 
 });
 
 test('seeded initial simulation state is reproducible', () => {
-  const a = smallSimulation('cascade', 9981);
-  const b = smallSimulation('cascade', 9981);
-  const c = smallSimulation('cascade', 9982);
+  const a = smallSimulation('steady', 9981);
+  const b = smallSimulation('steady', 9981);
+  const c = smallSimulation('steady', 9982);
   assert.deepEqual([...a.positions], [...b.positions]);
   assert.deepEqual([...a.velocities], [...b.velocities]);
   assert.notDeepEqual([...a.positions], [...c.positions]);

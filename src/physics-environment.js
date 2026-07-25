@@ -99,9 +99,7 @@ export class PhysicsEnvironment {
     this.staticVisuals.name = 'experiment-static-obstacles';
     this.dynamicVisuals = new THREE.Group();
     this.dynamicVisuals.name = 'experiment-dynamic-bodies';
-    this.holdingVisual = new THREE.Group();
-    this.holdingVisual.name = 'experiment-holding-zone';
-    scene.add(this.staticVisuals, this.dynamicVisuals, this.holdingVisual);
+    scene.add(this.staticVisuals, this.dynamicVisuals);
     this.dynamic = [];
     this.rebuild(config);
   }
@@ -127,11 +125,7 @@ export class PhysicsEnvironment {
   }
 
   dispose() {
-    for (const group of [
-      this.staticVisuals,
-      this.dynamicVisuals,
-      this.holdingVisual,
-    ]) {
+    for (const group of [this.staticVisuals, this.dynamicVisuals]) {
       for (const child of [...group.children]) disposeObject(child);
       group.removeFromParent();
     }
@@ -378,34 +372,6 @@ export class PhysicsEnvironment {
     this.dynamicVisuals.add(record.mesh);
     this.dynamic.push(record);
     return record;
-  }
-
-  updateHoldingZone(bounds, visible, released) {
-    for (const child of [...this.holdingVisual.children]) disposeObject(child);
-    if (!visible) return;
-    const size = bounds.size;
-    const geometry = new THREE.BoxGeometry(size[0], size[1], size[2]);
-    const mesh = new THREE.Mesh(
-      geometry,
-      new THREE.MeshBasicMaterial({
-        color: released ? '#93a6ad' : '#c75b58',
-        transparent: true,
-        opacity: this.config.holding.visibleOpacity,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      })
-    );
-    mesh.position.set(...bounds.center);
-    const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({
-        color: released ? '#93a6ad' : '#c75b58',
-        transparent: true,
-        opacity: 0.8,
-      })
-    );
-    edges.position.copy(mesh.position);
-    this.holdingVisual.add(mesh, edges);
   }
 
   step(dt) {

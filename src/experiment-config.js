@@ -96,9 +96,7 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     globalCohesionFactor: 0.35,
   },
   relations: {
-    policy: 'size',
     k: 1.35,
-    KMax: 2,
     hysteresis: 0.1,
     pursuitWeight: 1.05,
     evadeWeight: 1.3,
@@ -181,35 +179,6 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     biteGlowDuration: 0.45,
     biteGlowStrength: 0.85,
     biteGlowFalloff: 2.4,
-  },
-  holding: {
-    enabled: false,
-    schoolId: 'large',
-    settleSeconds: 3,
-    baselineSeconds: 2,
-    observationSeconds: 7,
-    zoneWidth: 0.42,
-    zoneHeight: 0.72,
-    zoneDepth: 0.72,
-    wallInset: 0.06,
-    guideForce: 2.4,
-    visibleOpacity: 0.14,
-  },
-  cascadeJudge: {
-    rogRiseFraction: 0.1,
-    minPeakLag: 0.25,
-    maxDirectImpulseRatio: 0.1,
-    attributionGain: 0.1,
-    radialSpeedThreshold: 0.05,
-    minAttributionSamples: 8,
-    minAverageNeighbors: 3,
-    maxBaselineRogShortestSideFactor: 0.5,
-    sampleInterval: 0.1,
-    pairedMinMediumDelta: 0.05,
-    pairedMinSmallDelta: 0.1,
-    firstSeed: 1001,
-    lastSeed: 1010,
-    batchStepsPerFrame: 3,
   },
   spatialHash: {
     enabled: true,
@@ -337,14 +306,12 @@ const scalarEntries = [
   entry('runtime.project', '项目', 'project', 'rebuildScene', {
     options: {
       '主项目 · 水族馆': 'aquarium',
-      '子实验 · 营养级联': 'cascade',
       '子实验 · 地图与刚体': 'obstacle',
       '子实验 · 生态淘汰': 'ecology',
     },
   }),
   entry('runtime.mode', 'Advanced · Runtime', 'mode', 'reset', {
     options: {
-      Cascade: 'cascade',
       'Predation · permanent death': 'steady',
       Ecology: 'ecology',
     },
@@ -391,7 +358,6 @@ const scalarEntries = [
   entry('tank.preset', '缸体', 'preset', 'rebuildScene', {
     options: {
       Aquarium: 'aquarium',
-      Cascade: 'cascade',
       Obstacle: 'obstacle',
       Ecology: 'ecology',
       Custom: 'custom',
@@ -476,20 +442,9 @@ const scalarEntries = [
     'live',
     { min: 0, max: 2, step: 0.01 }
   ),
-  entry('relations.policy', '关系', '角色规则', 'live', {
-    options: {
-      '体型自动（主项目）': 'size',
-      '尺寸窗口（级联实验）': 'window',
-    },
-  }),
   entry('relations.k', '关系', '捕食体型阈值 k', 'live', {
     min: 1.01,
     max: 2,
-    step: 0.01,
-  }),
-  entry('relations.KMax', '关系', '窗口上限 K max', 'live', {
-    min: 1.1,
-    max: 4,
     step: 0.01,
   }),
   entry('relations.hysteresis', '关系', 'hysteresis δ', 'live', {
@@ -869,153 +824,6 @@ const scalarEntries = [
     max: 12,
     step: 0.1,
   }),
-  entry('holding.enabled', 'Holding / Cascade', 'holding enabled', 'reset'),
-  entry('holding.schoolId', 'Holding / Cascade', 'held school id', 'reset'),
-  entry(
-    'holding.settleSeconds',
-    'Holding / Cascade',
-    'settle seconds',
-    'reset',
-    { min: 0, max: 20, step: 0.1 }
-  ),
-  entry(
-    'holding.baselineSeconds',
-    'Holding / Cascade',
-    'baseline seconds',
-    'reset',
-    { min: 0.5, max: 10, step: 0.1 }
-  ),
-  entry(
-    'holding.observationSeconds',
-    'Holding / Cascade',
-    'observation seconds',
-    'reset',
-    { min: 2, max: 30, step: 0.25 }
-  ),
-  entry('holding.zoneWidth', 'Holding / Cascade', 'zone width', 'reset', {
-    min: 0.1,
-    max: 1.5,
-    step: 0.01,
-  }),
-  entry('holding.zoneHeight', 'Holding / Cascade', 'zone height', 'reset', {
-    min: 0.1,
-    max: 2,
-    step: 0.01,
-  }),
-  entry('holding.zoneDepth', 'Holding / Cascade', 'zone depth', 'reset', {
-    min: 0.1,
-    max: 2,
-    step: 0.01,
-  }),
-  entry('holding.wallInset', 'Holding / Cascade', 'wall inset', 'reset', {
-    min: 0,
-    max: 0.4,
-    step: 0.01,
-  }),
-  entry('holding.guideForce', 'Holding / Cascade', 'holding guide force', 'live', {
-    min: 0,
-    max: 10,
-    step: 0.1,
-  }),
-  entry(
-    'holding.visibleOpacity',
-    'Holding / Cascade',
-    'zone opacity',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry(
-    'cascadeJudge.rogRiseFraction',
-    'Cascade 判据',
-    'RoG rise',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry('cascadeJudge.minPeakLag', 'Cascade 判据', 'min peak lag', 'live', {
-    min: 0,
-    max: 5,
-    step: 0.05,
-  }),
-  entry(
-    'cascadeJudge.maxDirectImpulseRatio',
-    'Cascade 判据',
-    'max direct impulse ratio',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry(
-    'cascadeJudge.attributionGain',
-    'Cascade 判据',
-    'attribution gain',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry(
-    'cascadeJudge.radialSpeedThreshold',
-    'Cascade 判据',
-    'radial speed threshold',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry(
-    'cascadeJudge.minAttributionSamples',
-    'Cascade 判据',
-    'min attribution samples',
-    'live',
-    { min: 1, max: 200, step: 1 }
-  ),
-  entry(
-    'cascadeJudge.minAverageNeighbors',
-    'Cascade 判据',
-    'min avg neighbors',
-    'live',
-    { min: 0, max: 30, step: 0.5 }
-  ),
-  entry(
-    'cascadeJudge.maxBaselineRogShortestSideFactor',
-    'Cascade 判据',
-    'baseline RoG / short side',
-    'live',
-    { min: 0.05, max: 1, step: 0.01 }
-  ),
-  entry(
-    'cascadeJudge.sampleInterval',
-    'Cascade 判据',
-    'sample interval',
-    'reset',
-    { min: 1 / 60, max: 1, step: 1 / 60 }
-  ),
-  entry(
-    'cascadeJudge.pairedMinMediumDelta',
-    'Cascade 判据',
-    'paired medium Δ',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry(
-    'cascadeJudge.pairedMinSmallDelta',
-    'Cascade 判据',
-    'paired small Δ',
-    'live',
-    { min: 0, max: 1, step: 0.01 }
-  ),
-  entry('cascadeJudge.firstSeed', 'Cascade 判据', 'first seed', 'live', {
-    min: 1,
-    max: 999999,
-    step: 1,
-  }),
-  entry('cascadeJudge.lastSeed', 'Cascade 判据', 'last seed', 'live', {
-    min: 1,
-    max: 999999,
-    step: 1,
-  }),
-  entry(
-    'cascadeJudge.batchStepsPerFrame',
-    'Advanced · Cascade',
-    'batch steps / frame',
-    'live',
-    { min: 1, max: 20, step: 1 }
-  ),
   entry('spatialHash.enabled', 'Advanced · Spatial Hash', 'hash enabled', 'reset'),
   entry('distanceField.enabled', '障碍距离场', 'distance field enabled', 'rebuildField'),
   entry('distanceField.cellSize', '障碍距离场', 'field cell size', 'rebuildField', {
@@ -1408,9 +1216,6 @@ export function validateConfig(candidate) {
   }
   const ids = candidate.schools?.map((item) => item.id) ?? [];
   if (new Set(ids).size !== ids.length) errors.push('鱼群 id 必须唯一');
-  if (candidate.relations?.KMax <= candidate.relations?.k) {
-    errors.push('relations.KMax 必须大于 relations.k');
-  }
   for (const school of candidate.schools) {
     if (school.maxSpeed < school.cruiseSpeed) {
       errors.push(`${school.id}: maxSpeed 必须不小于 cruiseSpeed`);
@@ -1423,9 +1228,6 @@ export function validateConfig(candidate) {
     if (headingLength <= 1e-8) {
       errors.push(`${school.id}: initialHeading 不能为零向量`);
     }
-  }
-  if (!ids.includes(candidate.holding.schoolId)) {
-    errors.push('holding.schoolId 必须引用现有鱼群');
   }
   for (const [id, obstacle] of Object.entries(candidate.obstacles)) {
     if (id === 'enabled' || obstacle.type !== 'ring') continue;
@@ -1447,12 +1249,6 @@ export function validateConfig(candidate) {
     candidate.traits?.burstStopStamina
   ) {
     errors.push('burstStartStamina 必须大于 burstStopStamina');
-  }
-  if (
-    candidate.cascadeJudge?.lastSeed <
-    candidate.cascadeJudge?.firstSeed
-  ) {
-    errors.push('lastSeed 必须不小于 firstSeed');
   }
   return { valid: errors.length === 0, errors, warnings };
 }

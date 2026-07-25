@@ -67,17 +67,6 @@ function applyProjectPreset(stage) {
     });
     stage.obstacles.enabled = false;
     stage.runtime.mode = 'steady';
-    stage.holding.enabled = false;
-    stage.relations.policy = 'size';
-    stage.traits.enabled = false;
-    restoreDefaultSchoolLayout(stage);
-  } else if (stage.runtime.project === 'cascade') {
-    Object.assign(stage.tank, { width: 3, height: 1.8, depth: 1.2 });
-    stage.tank.preset = 'cascade';
-    stage.obstacles.enabled = false;
-    stage.runtime.mode = 'cascade';
-    stage.holding.enabled = true;
-    stage.relations.policy = 'window';
     stage.traits.enabled = false;
     restoreDefaultSchoolLayout(stage);
   } else if (stage.runtime.project === 'obstacle') {
@@ -85,8 +74,6 @@ function applyProjectPreset(stage) {
     stage.tank.preset = 'obstacle';
     stage.obstacles.enabled = true;
     stage.runtime.mode = 'steady';
-    stage.holding.enabled = false;
-    stage.relations.policy = 'size';
     stage.traits.enabled = false;
     const obstacleCenters = {
       small: 0.23,
@@ -109,8 +96,6 @@ function applyProjectPreset(stage) {
     });
     stage.obstacles.enabled = false;
     stage.runtime.mode = 'ecology';
-    stage.holding.enabled = false;
-    stage.relations.policy = 'size';
     stage.traits.enabled = true;
     restoreDefaultSchoolLayout(stage);
   }
@@ -118,7 +103,7 @@ function applyProjectPreset(stage) {
 
 function applyTankPreset(stage) {
   if (
-    ['aquarium', 'cascade', 'obstacle', 'ecology'].includes(
+    ['aquarium', 'obstacle', 'ecology'].includes(
       stage.tank.preset
     )
   ) {
@@ -268,13 +253,8 @@ async function bootstrap() {
         0,
         Math.min(stage.schools.length - 1, index)
       );
-      const [removed] = stage.schools.splice(safeIndex, 1);
+      stage.schools.splice(safeIndex, 1);
       stage.runtime.populationPreset = 'custom';
-      if (removed?.id === stage.holding.schoolId) {
-        stage.holding.schoolId = stage.schools
-          .slice()
-          .sort((a, b) => b.size - a.size)[0].id;
-      }
       return this.applyConfig('rebuildScene');
     },
   };
@@ -307,9 +287,6 @@ async function bootstrap() {
       return result;
     },
     reset: () => controller.reset(),
-    releaseHolding: () => simulation.releaseHolding(),
-    runSeed: (seed) => simulation.runSeed(seed ?? current.runtime.seed),
-    runBatch: () => simulation.runBatch(),
     metrics: () => simulation.metrics(),
     spawnRigidBody: (type, options) =>
       physics.spawnRigidBody(type, options),

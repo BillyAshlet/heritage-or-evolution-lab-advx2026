@@ -3,14 +3,12 @@ import {
   RelationMatrix,
   SeededRng,
   SpatialHash3D,
-  analyzePairedCascade,
   captureRadius,
   deriveExperiment,
   ecologyOutcome,
   effectiveMaxSpeed,
   effectiveTurnSpeed,
   metabolicRate,
-  modeFlags,
   perPredatorCooldown,
   relationBetween,
   stepPlankton,
@@ -18,9 +16,7 @@ import {
   tankVolume,
 } from './experiment-model.js';
 import { sceneClearance, tankWallClearance } from './distance-field.js';
-import { CascadeProbe } from './cascade-probe.js';
 import { CaptureVfx } from './capture-vfx.js';
-import { deepClone } from './experiment-config.js';
 
 const EPSILON = 1e-8;
 const FORWARD = new THREE.Vector3(0, 0, 1);
@@ -77,8 +73,6 @@ export class ExperimentSimulation {
     this.relations = new RelationMatrix();
     this.hash = new SpatialHash3D(1);
     this.hiddenFish = -1;
-    this.batchRunning = false;
-    this.lastBatch = null;
     this.captureVfx = null;
     this.planktonMesh = null;
     this.metricsState = {
@@ -160,7 +154,6 @@ export class ExperimentSimulation {
     }
     this._buildMesh();
     this._buildPlanktonMesh();
-    this.probe = new CascadeProbe(this);
     this.reset(config.runtime.seed);
   }
 
@@ -248,11 +241,6 @@ export class ExperimentSimulation {
     this.seed = Number(seed);
     this.config.runtime.seed = this.seed;
     this.elapsed = 0;
-    this.released = !(
-      this.config.runtime.mode === 'cascade' &&
-      this.config.holding.enabled
-    );
-    this.releaseTime = this.released ? 0 : null;
     this.relations.reset();
     this.relationMatrix = this.relations.update(
       this.config.schools,
@@ -271,7 +259,6 @@ export class ExperimentSimulation {
       this.config.plankton.initialFraction;
     this.planktonConsumed = 0;
     this.ecologyStatus = { state: 'running', winnerIndex: null };
-    this.probe?.reset();
     this.captureVfx?.reset();
     this.alive.fill(1);
     this.panic.fill(0);
@@ -375,7 +362,6 @@ export class ExperimentSimulation {
       }
     }
     this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
-    this._syncHoldingVisual();
     this._syncPlanktonVisual();
     this.updateMesh();
     return this;
@@ -402,7 +388,6 @@ export class ExperimentSimulation {
       }
       this.mesh.instanceColor.needsUpdate = true;
     }
-    this._syncHoldingVisual();
     this._syncPlanktonVisual();
   }
 
@@ -427,64 +412,6 @@ export class ExperimentSimulation {
     this.planktonMesh.material.size = this.config.plankton.pointSize;
     this.planktonMesh.material.opacity = this.config.plankton.opacity;
     this.planktonMesh.material.color.set(this.config.plankton.color);
-  }
-
-  holdingBounds() {
-    const heldIndex = Math.max(
-      0,
-      this.config.schools.findIndex(
-        (school) => school.id === this.config.holding.schoolId
-      )
-    );
-    const school = this.config.schools[heldIndex];
-    return {
-      schoolIndex: heldIndex,
-      center: [
-        school.spawnRegion.centerX * this.config.tank.width,
-        school.spawnRegion.centerY * this.config.tank.height,
-        school.spawnRegion.centerZ * this.config.tank.depth,
-      ],
-      size: [
-        this.config.holding.zoneWidth,
-        this.config.holding.zoneHeight,
-        this.config.holding.zoneDepth,
-      ],
-    };
-  }
-
-  _syncHoldingVisual() {
-    this.physics?.updateHoldingZone(
-      this.holdingBounds(),
-      this.config.runtime.mode === 'cascade' &&
-        this.config.holding.enabled,
-      this.released
-    );
-  }
-
-  releaseHolding({ force = false } = {}) {
-    if (
-      this.config.runtime.mode !== 'cascade' ||
-      this.released ||
-      (!force && !this.probe.baselineStatus().ready)
-    ) {
-      return false;
-    }
-    this.released = true;
-    this.releaseTime = this.elapsed;
-    this.probe.release(this.elapsed);
-    this._syncHoldingVisual();
-    return true;
-  }
-
-  isHeldSchool(schoolIndex) {
-    if (
-      this.released ||
-      this.config.runtime.mode !== 'cascade' ||
-      !this.config.holding.enabled
-    ) {
-      return false;
-    }
-    return schoolIndex === this.holdingBounds().schoolIndex;
   }
 
   _clearAccumulators() {
@@ -631,10 +558,9 @@ export class ExperimentSimulation {
     }
   }
 
-  _crossSchoolPair(i, j, dx, dy, dz, distance2, dt) {
+  _crossSchoolPair(i, j, dx, dy, dz, distance2) {
     const schoolI = this.schoolIds[i];
     const schoolJ = this.schoolIds[j];
-    if (this.isHeldSchool(schoolI) || this.isHeldSchool(schoolJ)) return;
     const configSchoolI = this.config.schools[schoolI];
     const configSchoolJ = this.config.schools[schoolJ];
     const distance = Math.sqrt(Math.max(EPSILON, distance2));
@@ -646,9 +572,6 @@ export class ExperimentSimulation {
       const scale = strength / distance;
       add3(this.separation, i, -dx * scale, -dy * scale, -dz * scale);
       add3(this.separation, j, dx * scale, dy * scale, dz * scale);
-      const impulse = strength * dt;
-      this.probe.addImpulse(schoolJ, schoolI, impulse);
-      this.probe.addImpulse(schoolI, schoolJ, impulse);
     }
 
     this._directedRelation(i, j, dx, dy, dz, distance, distance2);
@@ -681,12 +604,6 @@ export class ExperimentSimulation {
         this.targetIsolation[actor] = isolation;
         this.targetDistance2[actor] = distance2;
       }
-      this.probe.addForbidden(
-        'pursuit',
-        actorSchool,
-        targetSchool,
-        1
-      );
     }
 
     // directThreat belongs to the prey and is proximity-driven. It does
@@ -718,16 +635,10 @@ export class ExperimentSimulation {
         awayZ +
           lateral[2] * this.config.relations.evadeLateralWeight
       );
-      this.probe.addForbidden(
-        'directThreat',
-        actorSchool,
-        targetSchool,
-        1
-      );
     }
   }
 
-  _pairPasses(dt) {
+  _pairPasses() {
     this.hash.forEachPair((i, j) => {
       this.metricsState.pairCount += 1;
       const io = i * 3;
@@ -748,7 +659,7 @@ export class ExperimentSimulation {
       const dy = this.positions[jo + 1] - this.positions[io + 1];
       const dz = this.positions[jo + 2] - this.positions[io + 2];
       const distance2 = dx * dx + dy * dy + dz * dz;
-      this._crossSchoolPair(i, j, dx, dy, dz, distance2, dt);
+      this._crossSchoolPair(i, j, dx, dy, dz, distance2);
     });
   }
 
@@ -771,22 +682,6 @@ export class ExperimentSimulation {
       if (positiveDistance < softness) {
         force[axis] -= 1 - positiveDistance / softness;
       }
-    }
-    return force;
-  }
-
-  _holdingForce(index) {
-    const schoolIndex = this.schoolIds[index];
-    if (!this.isHeldSchool(schoolIndex)) return [0, 0, 0];
-    const bounds = this.holdingBounds();
-    const offset = index * 3;
-    const force = [0, 0, 0];
-    for (let axis = 0; axis < 3; axis += 1) {
-      const half = bounds.size[axis] / 2;
-      const relative = this.positions[offset + axis] - bounds.center[axis];
-      const inner = Math.max(0.01, half - this.config.holding.wallInset);
-      if (relative < -inner) force[axis] += (-inner - relative) / inner;
-      if (relative > inner) force[axis] -= (relative - inner) / inner;
     }
     return force;
   }
@@ -1002,24 +897,17 @@ export class ExperimentSimulation {
       fz += this.avoidanceDirections[offset + 2] * weight;
     }
 
-    const holding = this._holdingForce(index);
-    fx += holding[0] * this.config.holding.guideForce;
-    fy += holding[1] * this.config.holding.guideForce;
-    fz += holding[2] * this.config.holding.guideForce;
-
     this.wanderPhases[index] += dt * (0.7 + (index % 13) * 0.017);
     const phase = this.wanderPhases[index];
     fx += Math.sin(phase * 1.31) * this.config.locomotion.wanderWeight;
     fy += Math.sin(phase * 1.73 + 2.1) * this.config.locomotion.wanderWeight;
     fz += Math.cos(phase * 1.17) * this.config.locomotion.wanderWeight;
 
-    const dynamic = this.batchRunning
-      ? null
-      : this.physics?.interactFish(point, [
-          this.velocities[offset],
-          this.velocities[offset + 1],
-          this.velocities[offset + 2],
-        ]);
+    const dynamic = this.physics?.interactFish(point, [
+      this.velocities[offset],
+      this.velocities[offset + 1],
+      this.velocities[offset + 2],
+    ]);
     if (dynamic) {
       fx += dynamic.force[0] * this.config.locomotion.avoidanceWeight;
       fy += dynamic.force[1] * this.config.locomotion.avoidanceWeight;
@@ -1200,85 +1088,76 @@ export class ExperimentSimulation {
   }
 
   _capture(dt) {
-    const flags = modeFlags(this.config.runtime.mode);
     for (let index = 0; index < this.count; index += 1) {
       if (!this.alive[index]) continue;
       this.cooldowns[index] = Math.max(0, this.cooldowns[index] - dt);
     }
-    if (flags.captureEnabled) {
-      for (let predator = 0; predator < this.count; predator += 1) {
-        const prey = this.pursuitTargets[predator];
-        if (
-          !this.alive[predator] ||
-          prey < 0 ||
-          !this.alive[prey] ||
-          this.cooldowns[predator] > 0
-        ) {
-          continue;
-        }
-        const predatorSchool = this.schoolIds[predator];
-        const preySchool = this.schoolIds[prey];
-        if (
-          relationBetween(
-            this.config.schools[predatorSchool],
-            this.config.schools[preySchool],
-            this.config.relations
-          ) !== 'pursuit'
-        ) {
-          continue;
-        }
-        const po = predator * 3;
-        const qo = prey * 3;
-        const distance = Math.hypot(
-          this.positions[qo] - this.positions[po],
-          this.positions[qo + 1] - this.positions[po + 1],
-          this.positions[qo + 2] - this.positions[po + 2]
-        );
-        const radius = captureRadius(
-          this.config,
+    for (let predator = 0; predator < this.count; predator += 1) {
+      const prey = this.pursuitTargets[predator];
+      if (
+        !this.alive[predator] ||
+        prey < 0 ||
+        !this.alive[prey] ||
+        this.cooldowns[predator] > 0
+      ) {
+        continue;
+      }
+      const predatorSchool = this.schoolIds[predator];
+      const preySchool = this.schoolIds[prey];
+      if (
+        relationBetween(
           this.config.schools[predatorSchool],
-          this.config.schools[preySchool]
-        );
-        if (distance > radius) continue;
-        this.captureVfx?.emit(
-          new THREE.Vector3(
-            this.positions[qo],
-            this.positions[qo + 1],
-            this.positions[qo + 2]
-          ),
-          new THREE.Vector3(
-            this.velocities[po],
-            this.velocities[po + 1],
-            this.velocities[po + 2]
-          ),
-          new THREE.Vector3(
-            this.positions[po],
-            this.positions[po + 1],
-            this.positions[po + 2]
-          )
-        );
-        this._finishChase(predator, prey, true);
-        this._killFish(prey, 'captured');
-        this.metricsState.captures += 1;
-        if (this.config.runtime.mode === 'ecology') {
-          this.energy[predator] = Math.min(
-            this.config.ecology.energyCapacity,
-            this.energy[predator] +
-              this.config.ecology.captureEnergyPerSize *
-                this.config.schools[preySchool].size
-          );
-        }
-        this.probe.addForbidden(
-          'captures',
-          predatorSchool,
-          preySchool,
-          1
-        );
-        this.cooldowns[predator] = perPredatorCooldown(
-          this._activeSchoolCount(predatorSchool),
-          this.config.capture.targetCaptureRate
+          this.config.schools[preySchool],
+          this.config.relations
+        ) !== 'pursuit'
+      ) {
+        continue;
+      }
+      const po = predator * 3;
+      const qo = prey * 3;
+      const distance = Math.hypot(
+        this.positions[qo] - this.positions[po],
+        this.positions[qo + 1] - this.positions[po + 1],
+        this.positions[qo + 2] - this.positions[po + 2]
+      );
+      const radius = captureRadius(
+        this.config,
+        this.config.schools[predatorSchool],
+        this.config.schools[preySchool]
+      );
+      if (distance > radius) continue;
+      this.captureVfx?.emit(
+        new THREE.Vector3(
+          this.positions[qo],
+          this.positions[qo + 1],
+          this.positions[qo + 2]
+        ),
+        new THREE.Vector3(
+          this.velocities[po],
+          this.velocities[po + 1],
+          this.velocities[po + 2]
+        ),
+        new THREE.Vector3(
+          this.positions[po],
+          this.positions[po + 1],
+          this.positions[po + 2]
+        )
+      );
+      this._finishChase(predator, prey, true);
+      this._killFish(prey, 'captured');
+      this.metricsState.captures += 1;
+      if (this.config.runtime.mode === 'ecology') {
+        this.energy[predator] = Math.min(
+          this.config.ecology.energyCapacity,
+          this.energy[predator] +
+            this.config.ecology.captureEnergyPerSize *
+              this.config.schools[preySchool].size
         );
       }
+      this.cooldowns[predator] = perPredatorCooldown(
+        this._activeSchoolCount(predatorSchool),
+        this.config.capture.targetCaptureRate
+      );
     }
   }
 
@@ -1298,7 +1177,7 @@ export class ExperimentSimulation {
     );
     this._clearAccumulators();
     this.hash.build(this.positions, this.alive, this.count);
-    this._pairPasses(dt);
+    this._pairPasses();
     this.schoolCenters.fill(0);
     this.schoolAliveCounts.fill(0);
     for (let index = 0; index < this.count; index += 1) {
@@ -1331,25 +1210,11 @@ export class ExperimentSimulation {
     }
     this._capture(dt);
     this._updateEcology(dt);
-    this.probe.sample(this.elapsed);
-    if (!this.batchRunning) this.physics?.step(dt);
+    this.physics?.step(dt);
     this.updateMesh();
   }
 
   step(dt) {
-    if (this.batchRunning) return;
-    // Once a valid baseline has been captured, hold the exact state until
-    // the operator releases it. Otherwise human reaction time becomes an
-    // unseeded variable and the same seed no longer describes one event.
-    if (
-      this.config.runtime.mode === 'cascade' &&
-      !this.released &&
-      this.probe.lockedBaseline
-    ) {
-      this.physics?.step(dt);
-      this.captureVfx?.step(dt);
-      return;
-    }
     const start = performance.now();
     this._advance(dt);
     const frameMs = performance.now() - start;
@@ -1584,8 +1449,6 @@ export class ExperimentSimulation {
       elapsed: this.elapsed,
       project: this.config.runtime.project,
       mode: this.config.runtime.mode,
-      released: this.released,
-      canRelease: this.probe.baselineStatus(),
       population: this.config.schools.map((school, index) => ({
         id: school.id,
         name: school.name,
@@ -1615,7 +1478,6 @@ export class ExperimentSimulation {
       simulationFps: this.metricsState.fps,
       renderFps: this.metricsState.renderFps ?? 0,
       predatorPairs,
-      cascade: this.probe.report(),
       ecology: {
         state: this.ecologyStatus.state,
         winnerId: ecologyWinner?.id ?? null,
@@ -1636,112 +1498,6 @@ export class ExperimentSimulation {
       },
       tankVolume: tankVolume(this.config.tank),
       warnings,
-      batch: this.lastBatch,
     };
-  }
-
-  runSeed(seed) {
-    this.reset(seed);
-    return this.metrics();
-  }
-
-  async runBatch() {
-    if (this.batchRunning) return this.lastBatch;
-    this.batchRunning = true;
-    const originalSeed = this.config.runtime.seed;
-    const results = [];
-    const first = this.config.cascadeJudge.firstSeed;
-    const last = this.config.cascadeJudge.lastSeed;
-    const dt = this.config.runtime.fixedDt;
-    const yieldFrame = () =>
-      new Promise((resolve) => requestAnimationFrame(resolve));
-    try {
-      for (let seed = first; seed <= last; seed += 1) {
-        const controlConfig = deepClone(this.config);
-        controlConfig.runtime.seed = seed;
-        const control = new ExperimentSimulation({
-          scene: null,
-          config: controlConfig,
-          distanceField: this.distanceField,
-          physics: null,
-        });
-        control.batchRunning = true;
-        this.reset(seed);
-        try {
-          const baselineSteps = Math.ceil(
-            (this.config.holding.settleSeconds +
-              this.config.holding.baselineSeconds) /
-              dt
-          );
-          const eventSteps = Math.ceil(
-            this.config.holding.observationSeconds / dt
-          );
-          let sinceYield = 0;
-          for (let step = 0; step < baselineSteps; step += 1) {
-            this._advance(dt);
-            control._advance(dt);
-            sinceYield += 1;
-            if (
-              sinceYield >=
-              this.config.cascadeJudge.batchStepsPerFrame
-            ) {
-              sinceYield = 0;
-              await yieldFrame();
-            }
-          }
-          this.releaseHolding({ force: true });
-          control.probe.beginControl(control.elapsed);
-          for (let step = 0; step < eventSteps; step += 1) {
-            this._advance(dt);
-            control._advance(dt);
-            sinceYield += 1;
-            if (
-              sinceYield >=
-              this.config.cascadeJudge.batchStepsPerFrame
-            ) {
-              sinceYield = 0;
-              await yieldFrame();
-            }
-          }
-          const eventReport = this.probe.report();
-          const controlReport = control.probe.report();
-          const eventResult = this.probe.finalize();
-          const controlResult = control.probe.finalize();
-          const paired = analyzePairedCascade({
-            baselineSamples: eventReport.baselineSamples,
-            eventSamples: eventReport.eventSamples,
-            controlSamples: controlReport.eventSamples,
-            forbidden: eventReport.forbidden,
-            config: this.config,
-            tank: this.config.tank,
-          });
-          results.push({
-            seed,
-            passed: paired.passed,
-            diagnosticOnly: true,
-            event: eventResult,
-            control: controlResult,
-            paired,
-          });
-        } finally {
-          control.dispose();
-        }
-      }
-      const pairedPasses = results.filter(
-        (result) => result.paired.passed
-      ).length;
-      this.lastBatch = {
-        results,
-        pairedPasses,
-        total: results.length,
-        diagnosticOnly: true,
-        verdict:
-          'paired evidence only; no aggregate pass/fail delivery gate',
-      };
-      return this.lastBatch;
-    } finally {
-      this.batchRunning = false;
-      this.reset(originalSeed);
-    }
   }
 }

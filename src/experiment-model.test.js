@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import {
   SeededRng,
   SpatialHash3D,
-  analyzePairedCascade,
-  analyzeCascadeSeries,
   captureRadius,
   deriveExperiment,
   ecologyOutcome,
@@ -88,16 +86,6 @@ test('main project derives predator and prey roles from live body size', () => {
   );
 });
 
-test('cascade sub-experiment keeps the explicit trophic window', () => {
-  const config = createDefaultConfig();
-  config.relations.policy = 'window';
-  const [small, medium, large] = config.schools;
-  assert.equal(relationBetween(medium, small, config.relations), 'pursuit');
-  assert.equal(relationBetween(large, medium, config.relations), 'pursuit');
-  assert.equal(relationBetween(large, small, config.relations), 'ignore');
-  assert.equal(relationBetween(small, large, config.relations), 'ignore');
-});
-
 test('burst, panic speed and visual capture distance are derived', () => {
   const config = createDefaultConfig();
   const [small, medium] = config.schools;
@@ -131,102 +119,6 @@ test('seeded RNG is reproducible without importing the rendering engine', () => 
     Array.from({ length: 20 }, () => rngA.next()),
     Array.from({ length: 20 }, () => rngB.next())
   );
-});
-
-test('synthetic cascade series proves ordered peaks, path and attribution', () => {
-  const config = createDefaultConfig();
-  const baselineSamples = Array.from({ length: 6 }, (_, index) => ({
-    time: index * 0.2,
-    rogMedium: 0.3,
-    rogSmall: 0.3,
-    neighborsMedium: 8,
-    neighborsSmall: 8,
-    mediumAttribution: 0.1,
-    attributionSamples: 30,
-  }));
-  const medium = [0.3, 0.38, 0.48, 0.4, 0.34, 0.32, 0.31, 0.3];
-  const small = [0.3, 0.31, 0.33, 0.38, 0.45, 0.5, 0.42, 0.35];
-  const eventSamples = medium.map((rogMedium, index) => ({
-    time: index * 0.25,
-    rogMedium,
-    rogSmall: small[index],
-    neighborsMedium: 8,
-    neighborsSmall: 8,
-    mediumAttribution: index >= 3 ? 0.4 : 0.1,
-    attributionSamples: 40,
-    largeToSmallImpulse: index * 0.3,
-    mediumToSmallImpulse: index * 8,
-  }));
-  const result = analyzeCascadeSeries({
-    baselineSamples,
-    eventSamples,
-    impulseByDirection: {
-      largeToSmall: 2,
-      mediumToSmall: 50,
-    },
-    forbidden: { pursuit: 0, directThreat: 0, captures: 0 },
-    config,
-    tank: config.tank,
-  });
-  assert.equal(result.passed, true);
-  assert.ok(result.peaks.lag >= config.cascadeJudge.minPeakLag);
-  assert.ok(
-    result.impulseRatio <
-      config.cascadeJudge.maxDirectImpulseRatio
-  );
-  assert.ok(
-    result.attributionGain >= config.cascadeJudge.attributionGain
-  );
-});
-
-test('paired cascade compares release against the same-seed holding control', () => {
-  const config = createDefaultConfig();
-  const baselineSamples = Array.from({ length: 5 }, (_, index) => ({
-    time: index * 0.1,
-    rogMedium: 0.4,
-    rogSmall: 0.4,
-    neighborsMedium: 8,
-    neighborsSmall: 8,
-  }));
-  const controlSamples = Array.from({ length: 8 }, (_, index) => ({
-    time: index * 0.25,
-    rogMedium: 0.4 + index * 0.01,
-    rogSmall: 0.4 + index * 0.012,
-  }));
-  const eventSamples = controlSamples.map((sample, index) => ({
-    ...sample,
-    rogMedium:
-      sample.rogMedium + [0, 0.02, 0.05, 0.08, 0.06, 0.04, 0.02, 0][index],
-    rogSmall:
-      sample.rogSmall + [0, 0, 0.01, 0.02, 0.05, 0.08, 0.06, 0.03][index],
-  }));
-  const result = analyzePairedCascade({
-    baselineSamples,
-    eventSamples,
-    controlSamples,
-    forbidden: { pursuit: 0, directThreat: 0, captures: 0 },
-    config,
-    tank: config.tank,
-  });
-  assert.equal(result.passed, true);
-  assert.ok(
-    result.effects.medium >= config.cascadeJudge.pairedMinMediumDelta
-  );
-  assert.ok(
-    result.effects.small >= config.cascadeJudge.pairedMinSmallDelta
-  );
-  assert.ok(result.peaks.lag >= config.cascadeJudge.minPeakLag);
-
-  const noiseOnly = analyzePairedCascade({
-    baselineSamples,
-    eventSamples: controlSamples,
-    controlSamples,
-    forbidden: { pursuit: 0, directThreat: 0, captures: 0 },
-    config,
-    tank: config.tank,
-  });
-  assert.equal(noiseOnly.passed, false);
-  assert.equal(noiseOnly.effects.small, 0);
 });
 
 test('ecology helpers implement logistic food, Kleiber-like drain and terminal outcomes', () => {

@@ -43,11 +43,31 @@ test('config JSON round-trips without loss and validates atomically', () => {
 
 test('default project is the live size-derived aquarium', () => {
   const config = createDefaultConfig();
+  const registry = createParameterRegistry(config);
+  const projectOptions = Object.values(
+    registry.find((spec) => spec.path === 'runtime.project').options
+  );
+  const modeOptions = Object.values(
+    registry.find((spec) => spec.path === 'runtime.mode').options
+  );
   assert.equal(config.runtime.project, 'aquarium');
   assert.equal(config.runtime.mode, 'steady');
-  assert.equal(config.relations.policy, 'size');
-  assert.equal(config.holding.enabled, false);
+  assert.deepEqual(projectOptions, ['aquarium', 'obstacle', 'ecology']);
+  assert.deepEqual(modeOptions, ['steady', 'ecology']);
+  assert.equal('policy' in config.relations, false);
+  assert.equal('holding' in config, false);
+  assert.equal('cascadeJudge' in config, false);
   assert.equal(config.captureVfx.enabled, true);
+});
+
+test('removed cascade project fails closed during config import', () => {
+  const legacy = createDefaultConfig();
+  legacy.runtime.project = 'cascade';
+  legacy.runtime.mode = 'cascade';
+  assert.throws(
+    () => importConfigJson(exportConfigJson(legacy)),
+    /runtime\.(project|mode) 不是允许值/
+  );
 });
 
 test('invalid predation geometry warns without partially rejecting config', () => {
