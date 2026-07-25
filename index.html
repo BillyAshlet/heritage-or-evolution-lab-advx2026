@@ -316,47 +316,204 @@
         font: 9px/1.45 inherit;
         white-space: pre-wrap;
       }
-      #fish-action-card {
+      #fish-inspector {
         position: absolute;
         left: max(12px, env(safe-area-inset-left));
-        top: 50%;
+        bottom: max(12px, env(safe-area-inset-bottom));
         z-index: 8;
-        display: grid;
-        width: 190px;
-        gap: 5px;
-        transform: translateY(-50%);
-        padding: 10px;
+        width: min(330px, calc(100% - 24px));
         border: 1px solid #9eb8ca;
-        background: rgba(247, 242, 234, 0.97);
+        background: transparent;
         color: #4d6477;
         font-size: 10px;
         line-height: 1.4;
+        box-shadow:
+          0 14px 38px rgba(59, 78, 91, 0.16),
+          inset 3px 0 #7197ad;
+        transition:
+          opacity 180ms ease,
+          transform 220ms ease;
       }
-      #fish-action-card[hidden] {
+      #fish-inspector[hidden] {
         display: none;
       }
-      #fish-action-card .action-eyebrow {
+      #fish-inspector header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 30px;
+        padding: 0 9px 0 11px;
+        border-bottom: 1px solid #afc4d1;
+        background:
+          repeating-linear-gradient(
+            135deg,
+            rgba(113, 151, 173, 0.08) 0,
+            rgba(113, 151, 173, 0.08) 1px,
+            transparent 1px,
+            transparent 5px
+          ),
+          #f7f2ea;
+      }
+      #fish-inspector .fish-inspector-index {
         color: #7890a2;
         font-size: 8px;
         letter-spacing: 0.14em;
       }
-      #fish-action-card button {
-        margin-top: 4px;
-        border: 1px solid #b9cbd8;
+      #fish-inspector-close {
+        width: 25px;
+        height: 25px;
+        border: 0;
+        background: transparent;
+        color: #6d8497;
+        font: 17px/1 inherit;
+        cursor: pointer;
+      }
+      #fish-preview-viewport {
+        position: relative;
+        height: 154px;
+        border-bottom: 1px solid #afc4d1;
+        background: transparent;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      #fish-preview-viewport::after {
+        position: absolute;
+        inset: 8px;
+        border:
+          1px solid rgba(247, 242, 234, 0.65);
+        content: "";
+        box-shadow:
+          12px 0 0 -11px rgba(77, 100, 119, 0.55),
+          -12px 0 0 -11px rgba(77, 100, 119, 0.55);
+      }
+      #fish-preview-viewport > span {
+        position: absolute;
+        right: 9px;
+        top: 8px;
+        z-index: 1;
+        padding: 3px 5px;
+        color: #f7f2ea;
+        background: rgba(51, 79, 99, 0.66);
+        font-size: 7px;
+        letter-spacing: 0.12em;
+      }
+      .fish-inspector-copy {
+        display: grid;
+        gap: 2px;
+        padding: 9px 11px 7px;
+        background: rgba(247, 242, 234, 0.96);
+      }
+      .fish-inspector-copy strong {
+        color: #334f63;
+        font-size: 12px;
+        letter-spacing: 0.03em;
+      }
+      .fish-inspector-copy span {
+        color: #71889a;
+        font-size: 9px;
+      }
+      .fish-inspector-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1px;
+        border-top: 1px solid #afc4d1;
+        background: #afc4d1;
+      }
+      .fish-inspector-actions button {
+        min-height: 40px;
+        border: 0;
         background: #e7f1f8;
         color: #4d6477;
         padding: 7px;
-        font: 10px inherit;
+        font: 9px/1.35 inherit;
         cursor: pointer;
       }
-      #fish-action-card .fish-action-list {
-        display: grid;
-        gap: 4px;
-      }
-      #fish-action-card .fish-action-list button:first-child {
-        border-color: #82a9c2;
+      .fish-inspector-actions button:first-child {
         background: #d9ebf6;
+        color: #334f63;
         font-weight: 650;
+      }
+      .fish-inspector-actions button:hover {
+        background: #edf5fa;
+      }
+      #fish-view-hud {
+        position: absolute;
+        left: max(14px, env(safe-area-inset-left));
+        top: max(14px, env(safe-area-inset-top));
+        z-index: 9;
+        display: grid;
+        gap: 2px;
+        min-width: 180px;
+        border-left: 3px solid #7197ad;
+        padding: 8px 10px;
+        color: #4d6477;
+        background: rgba(247, 242, 234, 0.86);
+        pointer-events: none;
+      }
+      #fish-view-hud[hidden] {
+        display: none;
+      }
+      #fish-view-hud span {
+        color: #7890a2;
+        font-size: 8px;
+        letter-spacing: 0.13em;
+      }
+      #fish-view-hud strong {
+        font-size: 12px;
+      }
+      #fish-view-hud kbd {
+        margin-top: 3px;
+        color: #9d514b;
+        font: 8px/1.4 inherit;
+        letter-spacing: 0.1em;
+      }
+      #time-shortcut-hud {
+        position: absolute;
+        left: 50%;
+        top: max(12px, env(safe-area-inset-top));
+        z-index: 7;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        transform: translateX(-50%);
+        border: 1px solid rgba(174, 196, 211, 0.9);
+        padding: 5px 8px 5px 5px;
+        color: #71889a;
+        background: rgba(247, 242, 234, 0.9);
+        font-size: 7px;
+        letter-spacing: 0.08em;
+        pointer-events: none;
+      }
+      #time-shortcut-hud strong {
+        min-width: 45px;
+        border: 1px solid #b9cbd8;
+        padding: 3px 5px;
+        color: #334f63;
+        background: #e7f1f8;
+        font-size: 9px;
+        text-align: center;
+      }
+      #time-shortcut-hud[data-paused="true"] strong {
+        border-color: #cfa9a5;
+        color: #9d514b;
+        background: #f3e5e2;
+      }
+      #app[data-selected-fish] #experiment-dashboard {
+        opacity: 0;
+        transform: translateY(calc(100% + 18px));
+      }
+      #experiment-dashboard {
+        transition:
+          opacity 180ms ease,
+          transform 220ms ease;
+      }
+      #app:is(
+          [data-camera-mode="closeup"],
+          [data-camera-mode="follow"]
+        )
+        :is(#panel-holder, #lab-mark, #experiment-dashboard, #fish-inspector) {
+        opacity: 0;
+        pointer-events: none;
       }
       button:focus-visible,
       input:focus-visible,
@@ -390,6 +547,17 @@
         }
         #experiment-dashboard canvas {
           height: 90px;
+        }
+        #fish-inspector {
+          width: min(300px, calc(100% - 16px));
+          left: 8px;
+          bottom: 8px;
+        }
+        #fish-preview-viewport {
+          height: 126px;
+        }
+        #time-shortcut-hud span {
+          display: none;
         }
       }
     </style>

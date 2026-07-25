@@ -1,22 +1,20 @@
 import * as THREE from 'three';
 
 const FORWARD = new THREE.Vector3(0, 0, 1);
+const UP = new THREE.Vector3(0, 1, 0);
 
-export function resolveDoubleClickTarget(
-  pickedHit,
-  lastClickHit,
-  elapsedMs,
-  maxAgeMs = 500
-) {
-  if (pickedHit >= 0) return pickedHit;
-  if (
-    lastClickHit >= 0 &&
-    elapsedMs >= 0 &&
-    elapsedMs <= maxAgeMs
-  ) {
-    return lastClickHit;
-  }
-  return -1;
+export const CAMERA_MODE = Object.freeze({
+  GLOBAL: 'global',
+  CLOSEUP: 'closeup',
+  FOLLOW: 'follow',
+});
+
+export function cameraModeAfterEscape(mode) {
+  return mode === CAMERA_MODE.GLOBAL ? CAMERA_MODE.GLOBAL : CAMERA_MODE.GLOBAL;
+}
+
+function dampAlpha(rate, dt) {
+  return 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dt));
 }
 
 export class ExperimentCameraController {
@@ -26,20 +24,18 @@ export class ExperimentCameraController {
     this.presentation = presentation;
     this.simulation = simulation;
     this.selected = -1;
-    this.firstPerson = false;
-    this.yaw = 0;
-    this.pitch = 0;
+    this.mode = CAMERA_MODE.GLOBAL;
     this.dragPointer = null;
     this.dragStart = null;
-    this.lastClickHit = -1;
-    this.lastClickAt = -Infinity;
     this.savedPose = null;
-    this.selectionSavedPose = null;
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
+    this.previewCamera = new THREE.PerspectiveCamera(34, 1, 0.01, 10);
     this.marker = this._createMarker();
-    this.card = this._createCard();
-    document.getElementById('app').dataset.cameraMode = 'global';
+    this.inspector = this._createInspector();
+    this.viewHud = this._createViewHud();
+    this.app = document.getElementById('app');
+    this.app.dataset.cameraMode = CAMERA_MODE.GLOBAL;
     this._bindEvents();
   }
 
@@ -59,39 +55,58 @@ export class ExperimentCameraController {
     return marker;
   }
 
-  _createCard() {
-    const card = document.createElement('div');
-    card.id = 'fish-action-card';
-    card.hidden = true;
-    card.innerHTML = `
-      <span class="action-eyebrow">SELECTED FISH</span>
-      <strong id="fish-action-title">—</strong>
-      <span id="fish-action-detail">—</span>
-      <div class="fish-action-list" role="group" aria-label="选中鱼操作">
-        <button type="button" id="fish-enter-first-person">进入第一人称</button>
-        <button type="button" id="fish-keep-following">继续跟随观察</button>
-        <button type="button" id="fish-return-global">返回全局视角</button>
+  _createInspector() {
+    const inspector = document.createElement('aside');
+    inspector.id = 'fish-inspector';
+    inspector.hidden = true;
+    inspector.setAttribute('aria-label', '鱼个体观察窗口');
+    inspector.innerHTML = `
+      <header>
+        <span class="fish-inspector-index">SPECIMEN VIEW</span>
+        <button type="button" id="fish-inspector-close" aria-label="关闭鱼观察窗口">×</button>
+      </header>
+      <div id="fish-preview-viewport" aria-label="鱼的第三人称实时特写">
+        <span>LIVE · THIRD PERSON</span>
+      </div>
+      <div class="fish-inspector-copy">
+        <strong id="fish-inspector-title">—</strong>
+        <span id="fish-inspector-detail">—</span>
+      </div>
+      <div class="fish-inspector-actions" role="group" aria-label="鱼观察视角">
+        <button type="button" id="fish-enter-closeup">特写视角 · 全屏</button>
+        <button type="button" id="fish-enter-follow">跟随视角 · 全屏</button>
       </div>
     `;
-    document.getElementById('app').appendChild(card);
-    card
-      .querySelector('#fish-enter-first-person')
-      .addEventListener('click', () => this.enterFirstPerson(this.selected));
-    card
-      .querySelector('#fish-keep-following')
-      .addEventListener('click', () => {
-        this.card.hidden = true;
-      });
-    card
-      .querySelector('#fish-return-global')
+    document.getElementById('app').appendChild(inspector);
+    inspector
+      .querySelector('#fish-inspector-close')
       .addEventListener('click', () => this.clearSelection());
-    return card;
+    inspector
+      .querySelector('#fish-enter-closeup')
+      .addEventListener('click', () => this.enterCloseup());
+    inspector
+      .querySelector('#fish-enter-follow')
+      .addEventListener('click', () => this.enterFollow());
+    return inspector;
+  }
+
+  _createViewHud() {
+    const hud = document.createElement('div');
+    hud.id = 'fish-view-hud';
+    hud.hidden = true;
+    hud.innerHTML = `
+      <span id="fish-view-mode">—</span>
+      <strong id="fish-view-name">—</strong>
+      <kbd>ESC 退出</kbd>
+    `;
+    document.getElementById('app').appendChild(hud);
+    return hud;
   }
 
   _bindEvents() {
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || this.mode !== CAMERA_MODE.GLOBAL) return;
       this.dragPointer = event.pointerId;
       this.dragStart = {
         x: event.clientX,
@@ -102,22 +117,14 @@ export class ExperimentCameraController {
     });
     canvas.addEventListener('pointermove', (event) => {
       if (event.pointerId !== this.dragPointer || !this.dragStart) return;
-      const dx = event.clientX - this.dragStart.x;
-      const dy = event.clientY - this.dragStart.y;
-      if (Math.hypot(dx, dy) > 4) this.dragStart.moved = true;
-      if (this.firstPerson) {
-        this.yaw -=
-          event.movementX * this.simulation.config.camera.pointerSensitivity;
-        this.pitch = THREE.MathUtils.clamp(
-          this.pitch -
-            event.movementY *
-              this.simulation.config.camera.pointerSensitivity,
-          -Math.PI * 0.45,
-          Math.PI * 0.45
-        );
+      if (
+        Math.hypot(
+          event.clientX - this.dragStart.x,
+          event.clientY - this.dragStart.y
+        ) > 4
+      ) {
+        this.dragStart.moved = true;
       }
-      this.dragStart.x = event.clientX;
-      this.dragStart.y = event.clientY;
     });
     canvas.addEventListener('pointerup', (event) => {
       if (event.pointerId !== this.dragPointer) return;
@@ -125,25 +132,16 @@ export class ExperimentCameraController {
       this.dragPointer = null;
       this.dragStart = null;
       canvas.releasePointerCapture?.(event.pointerId);
-      if (!wasMoved && !this.firstPerson) this._handleClick(event);
-    });
-    canvas.addEventListener('dblclick', (event) => {
-      event.preventDefault();
-      const pickedHit = this._pick(event);
-      const hit = resolveDoubleClickTarget(
-        pickedHit,
-        this.lastClickHit,
-        performance.now() - this.lastClickAt
-      );
-      if (hit >= 0) this.enterFirstPerson(hit);
-      else this.exitFirstPerson();
-    });
-    canvas.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      this.exitFirstPerson();
+      if (!wasMoved && this.mode === CAMERA_MODE.GLOBAL) {
+        this._handleClick(event);
+      }
     });
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') this.exitFirstPerson();
+      if (event.key !== 'Escape') return;
+      if (this.mode !== CAMERA_MODE.GLOBAL || this.selected >= 0) {
+        event.preventDefault();
+        this.exitView(true);
+      }
     });
   }
 
@@ -168,205 +166,278 @@ export class ExperimentCameraController {
 
   _handleClick(event) {
     const hit = this._pick(event);
-    this.lastClickHit = hit;
-    this.lastClickAt = performance.now();
     if (hit < 0) {
       this.clearSelection();
       return;
     }
-    if (hit === this.selected) {
-      this._showCard();
-    } else {
-      this.select(hit);
-    }
+    this.select(hit);
   }
 
   select(index) {
     const fish = this.simulation.fish(index);
     if (!fish?.alive) return false;
-    if (this.selected < 0 && !this.firstPerson) {
-      this.selectionSavedPose = {
-        position: this.camera.position.clone(),
-        quaternion: this.camera.quaternion.clone(),
-        near: this.camera.near,
-      };
-    }
     this.selected = index;
-    document.getElementById('app').dataset.selectedFish = String(index);
-    this.card.hidden = true;
+    this.app.dataset.selectedFish = String(index);
     this.marker.visible = true;
-    this.presentation.cameraSettings.orbitEnabled = false;
+    this.inspector.hidden = false;
+    this.presentation.cameraSettings.orbitEnabled = true;
+    this._refreshLabels(fish);
     return true;
   }
 
   clearSelection() {
-    if (this.firstPerson) return;
+    if (this.mode !== CAMERA_MODE.GLOBAL) this.exitView(false);
     this.selected = -1;
-    delete document.getElementById('app').dataset.selectedFish;
+    delete this.app.dataset.selectedFish;
     this.marker.visible = false;
-    this.card.hidden = true;
-    if (this.selectionSavedPose) {
-      this.camera.position.copy(this.selectionSavedPose.position);
-      this.camera.quaternion.copy(this.selectionSavedPose.quaternion);
-      this.camera.near = this.selectionSavedPose.near;
-      this.camera.updateProjectionMatrix();
-    }
-    this.selectionSavedPose = null;
+    this.inspector.hidden = true;
+    this.viewHud.hidden = true;
     this.presentation.cameraSettings.orbitEnabled = true;
   }
 
-  _showCard() {
-    const fish = this.simulation.fish(this.selected);
-    if (!fish?.alive) return;
+  _refreshLabels(fish) {
     const relations =
       this.simulation.relationMatrix[fish.schoolIndex] ?? [];
     const hunts = relations.filter((value) => value === 'pursuit').length;
     const flees = relations.filter((value) => value === 'evade').length;
     const role =
       hunts && flees
-        ? '双重角色'
+        ? '捕食者 / 被捕食者'
         : hunts
           ? '捕食者'
           : flees
             ? '被捕食者'
             : '同级个体';
-    this.card.querySelector('#fish-action-title').textContent =
-      `${fish.school.name} #${fish.index}`;
-    this.card.querySelector('#fish-action-detail').textContent =
-      `${role} · panic ${fish.panic.toFixed(2)} · speed ${Math.hypot(...fish.velocity).toFixed(2)}`;
-    this.card.hidden = false;
+    const title = `${fish.school.name} #${fish.index}`;
+    const detail =
+      `${role} · panic ${fish.panic.toFixed(2)} · ` +
+      `speed ${Math.hypot(...fish.velocity).toFixed(2)}`;
+    this.inspector.querySelector('#fish-inspector-title').textContent = title;
+    this.inspector.querySelector('#fish-inspector-detail').textContent = detail;
+    this.viewHud.querySelector('#fish-view-name').textContent = title;
   }
 
-  enterFirstPerson(index = this.selected) {
-    if (!this.select(index)) return false;
-    if (!this.firstPerson) {
+  _enterMode(mode) {
+    if (!this.select(this.selected) || mode === CAMERA_MODE.GLOBAL) return false;
+    if (this.mode === CAMERA_MODE.GLOBAL) {
       this.savedPose = {
         position: this.camera.position.clone(),
         quaternion: this.camera.quaternion.clone(),
         near: this.camera.near,
+        fov: this.camera.fov,
       };
     }
-    this.firstPerson = true;
-    document.getElementById('app').dataset.cameraMode = 'first-person';
-    this.yaw = 0;
-    this.pitch = 0;
-    this.card.hidden = true;
-    this.marker.visible = false;
+    this.mode = mode;
+    this.app.dataset.cameraMode = mode;
+    this.inspector.hidden = true;
+    this.marker.visible = true;
+    this.viewHud.hidden = false;
+    this.viewHud.querySelector('#fish-view-mode').textContent =
+      mode === CAMERA_MODE.CLOSEUP
+        ? 'FULLSCREEN · CLOSE-UP'
+        : 'FULLSCREEN · FOLLOW';
     this.presentation.cameraSettings.orbitEnabled = false;
-    this.camera.near = this.simulation.config.camera.firstPersonNear;
-    this.camera.updateProjectionMatrix();
-    this.simulation.setHiddenFish(index);
+    this.simulation.setHiddenFish(-1);
     return true;
   }
 
-  exitFirstPerson() {
-    if (!this.firstPerson) return false;
-    this.firstPerson = false;
-    document.getElementById('app').dataset.cameraMode = 'global';
-    this.simulation.setHiddenFish(-1);
-    if (this.savedPose) {
+  enterCloseup(index = this.selected) {
+    if (index !== this.selected && !this.select(index)) return false;
+    return this._enterMode(CAMERA_MODE.CLOSEUP);
+  }
+
+  enterFollow(index = this.selected) {
+    if (index !== this.selected && !this.select(index)) return false;
+    return this._enterMode(CAMERA_MODE.FOLLOW);
+  }
+
+  exitView(clearSelection = false) {
+    if (this.mode !== CAMERA_MODE.GLOBAL && this.savedPose) {
       this.camera.position.copy(this.savedPose.position);
       this.camera.quaternion.copy(this.savedPose.quaternion);
       this.camera.near = this.savedPose.near;
+      this.camera.fov = this.savedPose.fov;
       this.camera.updateProjectionMatrix();
     }
+    this.mode = cameraModeAfterEscape(this.mode);
+    this.app.dataset.cameraMode = CAMERA_MODE.GLOBAL;
     this.savedPose = null;
-    this.marker.visible = this.selected >= 0;
+    this.viewHud.hidden = true;
     this.presentation.cameraSettings.orbitEnabled = true;
+    this.simulation.setHiddenFish(-1);
+    if (clearSelection) {
+      this.clearSelection();
+    } else if (this.selected >= 0) {
+      this.marker.visible = true;
+      this.inspector.hidden = false;
+    }
     return true;
   }
 
   onSimulationRebuilt(simulation) {
-    this.exitFirstPerson();
+    this.exitView(true);
     this.simulation = simulation;
-    this.clearSelection();
   }
 
   _fallbackIfDead() {
     if (this.selected < 0 || this.simulation.alive[this.selected]) return;
     const fallback = this.simulation.nearestAliveSameSchool(this.selected);
     if (fallback >= 0) {
-      const wasFirstPerson = this.firstPerson;
-      this.simulation.setHiddenFish(-1);
       this.selected = fallback;
-      document.getElementById('app').dataset.selectedFish =
-        String(fallback);
-      if (wasFirstPerson) this.simulation.setHiddenFish(fallback);
+      this.app.dataset.selectedFish = String(fallback);
     } else {
-      this.exitFirstPerson();
-      this.clearSelection();
+      this.exitView(true);
     }
+  }
+
+  _fishFrame(fish) {
+    const position = new THREE.Vector3(...fish.position);
+    const forward = new THREE.Vector3(...fish.velocity);
+    if (forward.lengthSq() < 1e-9) forward.copy(FORWARD);
+    forward.normalize();
+    const right = new THREE.Vector3().crossVectors(UP, forward);
+    if (right.lengthSq() < 1e-9) right.set(1, 0, 0);
+    right.normalize();
+    return { position, forward, right };
+  }
+
+  _closeupPose(fish) {
+    const config = this.simulation.config.camera;
+    const frame = this._fishFrame(fish);
+    const framingScale = Math.max(0.2, fish.school.size);
+    const cameraPosition = frame.position
+      .clone()
+      .addScaledVector(
+        frame.forward,
+        -config.closeupDistance * framingScale
+      )
+      .addScaledVector(frame.right, config.closeupSide * framingScale)
+      .addScaledVector(UP, config.closeupHeight * framingScale);
+    const lookTarget = frame.position
+      .clone()
+      .addScaledVector(frame.forward, config.lookAhead * 0.08);
+    return { ...frame, cameraPosition, lookTarget };
+  }
+
+  _applyPose(targetCamera, pose, dt, fov) {
+    const config = this.simulation.config.camera;
+    targetCamera.position.lerp(
+      pose.cameraPosition,
+      dampAlpha(config.positionDamping, dt)
+    );
+    const matrix = new THREE.Matrix4().lookAt(
+      targetCamera.position,
+      pose.lookTarget,
+      UP
+    );
+    const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
+      matrix
+    );
+    targetCamera.quaternion.slerp(
+      targetQuaternion,
+      dampAlpha(config.orientationDamping, dt)
+    );
+    targetCamera.fov = fov;
+    targetCamera.near = config.globalNear;
+    targetCamera.updateProjectionMatrix();
   }
 
   update(dt) {
     this._fallbackIfDead();
-    const cameraConfig = this.simulation.config.camera;
-    this.presentation.cameraSettings.fov = cameraConfig.fov;
-    if (!this.firstPerson && this.camera.near !== cameraConfig.globalNear) {
-      this.camera.near = cameraConfig.globalNear;
-      this.camera.updateProjectionMatrix();
-    }
     const fish = this.simulation.fish(this.selected);
     if (!fish?.alive) return;
-    const position = new THREE.Vector3(...fish.position);
-    const velocity = new THREE.Vector3(...fish.velocity);
-    if (velocity.lengthSq() < 1e-9) velocity.copy(FORWARD);
-    velocity.normalize();
+    this._refreshLabels(fish);
+    const config = this.simulation.config.camera;
+    const frame = this._fishFrame(fish);
+    this.marker.position.copy(frame.position);
+    this.marker.quaternion.setFromUnitVectors(FORWARD, frame.forward);
 
-    if (!this.firstPerson) {
+    const closeupPose = this._closeupPose(fish);
+    this._applyPose(
+      this.previewCamera,
+      closeupPose,
+      dt,
+      config.closeupFov
+    );
+
+    if (this.mode === CAMERA_MODE.GLOBAL) {
       this.marker.visible = true;
-      this.marker.position.copy(position);
-      this.marker.quaternion.setFromUnitVectors(FORWARD, velocity);
-      const desiredPosition = position
-        .clone()
-        .addScaledVector(velocity, -cameraConfig.focusDistance)
-        .addScaledVector(this.camera.up, cameraConfig.focusHeight);
-      this.camera.position.lerp(
-        desiredPosition,
-        1 - Math.exp(-cameraConfig.positionDamping * dt)
-      );
-      const lookTarget = position
-        .clone()
-        .addScaledVector(velocity, cameraConfig.lookAhead * 0.18);
-      const targetMatrix = new THREE.Matrix4().lookAt(
-        this.camera.position,
-        lookTarget,
-        this.camera.up
-      );
-      const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(
-        targetMatrix
-      );
-      this.camera.quaternion.slerp(
-        targetQuaternion,
-        1 - Math.exp(-cameraConfig.orientationDamping * dt)
-      );
+      return;
+    }
+    this.marker.visible = true;
+    if (this.mode === CAMERA_MODE.CLOSEUP) {
+      this._applyPose(this.camera, closeupPose, dt, config.closeupFov);
       return;
     }
 
-    const config = this.simulation.config.camera;
-    const desiredPosition = position
+    const followPosition = frame.position
       .clone()
-      .addScaledVector(velocity, config.headOffset);
-    this.camera.position.lerp(
-      desiredPosition,
-      1 - Math.exp(-config.positionDamping * dt)
+      .addScaledVector(
+        frame.forward,
+        -config.focusDistance * Math.max(0.2, fish.school.size)
+      )
+      .addScaledVector(
+        UP,
+        config.focusHeight * Math.max(0.2, fish.school.size)
+      );
+    const followTarget = frame.position
+      .clone()
+      .addScaledVector(frame.forward, config.lookAhead * 0.18);
+    this._applyPose(
+      this.camera,
+      {
+        cameraPosition: followPosition,
+        lookTarget: followTarget,
+      },
+      dt,
+      config.fov
     );
-    const base = new THREE.Quaternion().setFromUnitVectors(FORWARD, velocity);
-    const yaw = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      this.yaw
-    );
-    const pitch = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(1, 0, 0),
-      this.pitch
-    );
-    const desiredRotation = base.multiply(yaw).multiply(pitch);
-    this.camera.quaternion.slerp(
-      desiredRotation,
-      1 - Math.exp(-config.orientationDamping * dt)
-    );
-    this.camera.near = config.firstPersonNear;
-    this.camera.fov = config.fov;
-    this.camera.updateProjectionMatrix();
+  }
+
+  renderPreview() {
+    if (
+      this.mode !== CAMERA_MODE.GLOBAL ||
+      this.inspector.hidden ||
+      this.selected < 0
+    ) {
+      return;
+    }
+    const viewport = this.inspector.querySelector('#fish-preview-viewport');
+    const targetRect = viewport.getBoundingClientRect();
+    const canvasRect = this.renderer.domElement.getBoundingClientRect();
+    if (
+      targetRect.width <= 1 ||
+      targetRect.height <= 1 ||
+      canvasRect.width <= 1 ||
+      canvasRect.height <= 1
+    ) {
+      return;
+    }
+
+    // WebGLRenderer.setViewport/setScissor accept logical pixels and apply
+    // the renderer pixel ratio internally. Multiplying by DPR here would
+    // double-scale the preview and make it spill over the main view.
+    const x = targetRect.left - canvasRect.left;
+    const y = canvasRect.bottom - targetRect.bottom;
+    const width = targetRect.width;
+    const height = targetRect.height;
+    this.previewCamera.aspect = targetRect.width / targetRect.height;
+    this.previewCamera.updateProjectionMatrix();
+
+    const oldViewport = this.renderer.getViewport(new THREE.Vector4());
+    const oldScissor = this.renderer.getScissor(new THREE.Vector4());
+    const oldScissorTest = this.renderer.getScissorTest();
+    const oldColor = this.renderer.getClearColor(new THREE.Color()).clone();
+    const oldAlpha = this.renderer.getClearAlpha();
+    this.renderer.setViewport(x, y, width, height);
+    this.renderer.setScissor(x, y, width, height);
+    this.renderer.setScissorTest(true);
+    this.renderer.setClearColor('#dce9ef', 1);
+    this.renderer.clear(true, true, true);
+    this.renderer.render(this.simulation.scene, this.previewCamera);
+    this.renderer.setClearColor(oldColor, oldAlpha);
+    this.renderer.setViewport(oldViewport);
+    this.renderer.setScissor(oldScissor);
+    this.renderer.setScissorTest(oldScissorTest);
   }
 }

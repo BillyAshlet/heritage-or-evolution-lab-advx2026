@@ -17,6 +17,7 @@ import {
 import { ExperimentSimulation } from './experiment-simulation.js';
 import { ExperimentCameraController } from './experiment-camera.js';
 import { createExperimentDebug } from './experiment-debug.js';
+import { TimeShortcutController } from './time-shortcuts.js';
 
 const startup = document.getElementById('startup-status');
 
@@ -191,7 +192,7 @@ async function bootstrap() {
         simulation.distanceField = distanceField;
         simulation.physics = physics;
         simulation.setConfig(current, 'reset');
-        cameraController.exitFirstPerson();
+        cameraController.exitView(true);
       } else {
         syncTank(current);
         distanceField = new DistanceField3D(current);
@@ -210,7 +211,7 @@ async function bootstrap() {
       physics.rebuild(current);
       simulation.physics = physics;
       simulation.reset(current.runtime.seed);
-      cameraController.exitFirstPerson();
+      cameraController.exitView(true);
       return simulation.metrics();
     },
     restoreDefaults() {
@@ -264,6 +265,14 @@ async function bootstrap() {
     simulation,
     spawnRigidBody: (type, options) =>
       physics.spawnRigidBody(type, options),
+  });
+  const timeShortcuts = new TimeShortcutController({
+    setTimeScale(value) {
+      stage.runtime.timeScale = value;
+      controller.applyConfig('live', 'runtime.timeScale');
+      debug.pane?.refresh();
+      return current.runtime.timeScale;
+    },
   });
 
   const experimentApi = {
@@ -321,6 +330,8 @@ async function bootstrap() {
     world.step(nowMs);
     cameraController.update(realDt);
     renderer.render(scene, camera);
+    cameraController.renderPreview();
+    timeShortcuts.update(current.runtime.timeScale);
     debug.update(nowMs);
   });
   setStartup('Web 实验版已就绪', 'ready');

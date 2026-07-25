@@ -278,14 +278,15 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
   camera: {
     fov: 45,
     globalNear: 0.01,
-    firstPersonNear: 0.035,
     focusDistance: 0.3,
     focusHeight: 0.09,
-    headOffset: 0.018,
+    closeupDistance: 0.11,
+    closeupSide: 0.07,
+    closeupHeight: 0.04,
+    closeupFov: 30,
     lookAhead: 0.2,
     positionDamping: 12,
     orientationDamping: 9,
-    pointerSensitivity: 0.0022,
   },
 });
 
@@ -917,25 +918,35 @@ const scalarEntries = [
     max: 0.2,
     step: 0.001,
   }),
-  entry('camera.firstPersonNear', '相机', 'first-person near', 'live', {
-    min: 0.001,
-    max: 0.2,
-    step: 0.001,
-  }),
-  entry('camera.focusDistance', '相机', '聚焦跟随距离', 'live', {
+  entry('camera.focusDistance', '相机', '跟随后距 / size', 'live', {
     min: 0.08,
     max: 2,
     step: 0.01,
   }),
-  entry('camera.focusHeight', '相机', '聚焦高度', 'live', {
+  entry('camera.focusHeight', '相机', '跟随高度 / size', 'live', {
     min: -0.5,
     max: 1,
     step: 0.01,
   }),
-  entry('camera.headOffset', '相机', 'head offset', 'live', {
-    min: 0,
-    max: 0.2,
-    step: 0.002,
+  entry('camera.closeupDistance', '相机', '特写后距 / size', 'live', {
+    min: 0.04,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('camera.closeupSide', '相机', '特写侧移 / size', 'live', {
+    min: -1,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('camera.closeupHeight', '相机', '特写高度 / size', 'live', {
+    min: -0.5,
+    max: 1,
+    step: 0.01,
+  }),
+  entry('camera.closeupFov', '相机', '特写 FOV', 'live', {
+    min: 15,
+    max: 90,
+    step: 1,
   }),
   entry('camera.lookAhead', '相机', 'look ahead', 'live', {
     min: 0.02,
@@ -951,11 +962,6 @@ const scalarEntries = [
     min: 0.1,
     max: 40,
     step: 0.1,
-  }),
-  entry('camera.pointerSensitivity', '相机', 'pointer sensitivity', 'live', {
-    min: 0.0001,
-    max: 0.02,
-    step: 0.0001,
   }),
 ];
 
