@@ -526,6 +526,73 @@
   max-width: 60ch;
 }
 
+/* Long-form concept statement: keep the reading column calm and bounded.
+   The body deliberately has no per-word cursor effect — thousands of spans
+   would add cost without improving a long reading experience. */
+.vo-concept__article {
+  width: min(100%, 76ch);
+  margin: 0 auto;
+  padding: 1vh 0 10vh;
+  color: var(--v-text);
+  font-size: clamp(0.9rem, 1.25vw, 1.02rem);
+  line-height: 1.9;
+}
+.vo-concept__article .vo-concept__title {
+  margin: 0 0 0.4em;
+  color: var(--v-text);
+  font-size: clamp(2rem, 5vw, 4.6rem);
+  font-variation-settings: 'wght' 260;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+.vo-concept__article .vo-concept__title + p {
+  margin: 0 0 12vh;
+  color: var(--v-muted);
+  font-size: clamp(1rem, 1.8vw, 1.3rem);
+  letter-spacing: 0.08em;
+}
+.vo-concept__article h2 {
+  margin: 10vh 0 1.2em;
+  padding-top: 0.8em;
+  border-top: 1px solid var(--v-border);
+  color: var(--v-accent);
+  font-size: clamp(1.35rem, 2.4vw, 2rem);
+  font-variation-settings: 'wght' 520;
+  letter-spacing: 0.06em;
+}
+.vo-concept__article h3 {
+  margin: 3.5em 0 0.7em;
+  color: var(--v-text);
+  font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+  font-variation-settings: 'wght' 650;
+}
+.vo-concept__article p {
+  margin: 0 0 1.45em;
+}
+.vo-concept__article strong {
+  color: #f0eadc;
+  font-variation-settings: 'wght' 680;
+}
+.vo-concept__article blockquote {
+  margin: 0.5em 0 2em;
+  padding: 0.8em 0 0.8em 1.4em;
+  border-left: 2px solid var(--v-accent);
+  color: var(--v-muted);
+  font-family: Georgia, 'Noto Serif SC', serif;
+  font-size: 1.05em;
+}
+.vo-concept__article ul {
+  margin: 0 0 2em;
+  padding-left: 1.4em;
+}
+.vo-concept__article li {
+  margin-bottom: 0.9em;
+  padding-left: 0.35em;
+}
+.vo-concept__article li::marker {
+  color: var(--v-accent);
+}
+
 /* ── SETTINGS ─────────────────────────────────────────────────────────── */
 .vo-settings__row {
   display: flex;

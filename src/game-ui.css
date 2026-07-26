@@ -1,22 +1,25 @@
 #game-ui-root {
-  --game-paper: rgba(247, 242, 234, 0.97);
-  --game-paper-solid: #f7f2ea;
-  --game-canvas: #f4efe6;
-  --game-ink: #293f4d;
-  --game-muted: #4f6675;
-  --game-faint: #526a78;
-  --game-rule: #b9cbd6;
-  --game-rule-strong: #839fab;
-  --game-blue: #376c86;
-  --game-blue-soft: #dcebf2;
-  --game-rust: #934d40;
-  --game-rust-soft: #f0ded8;
-  --game-green: #526c32;
-  --game-green-soft: #e4ead8;
-  --game-shadow: 0 22px 60px rgba(41, 63, 77, 0.16);
-  --game-serif: "Songti SC", "STSong", "Noto Serif CJK SC", Georgia, serif;
+  /* 暗色调色板对齐开场游客壳（visitor.css）：近黑底 + 米白字 + 琥珀金强调。
+     变量名保留旧名（paper/blue 等）避免全文件改名，语义以右侧值为准。 */
+  --game-paper: rgba(15, 14, 12, 0.94);
+  --game-paper-solid: #0f0e0c;
+  --game-canvas: #1a1815;
+  --game-ink: #ddd8cc;
+  --game-muted: rgba(221, 216, 204, 0.68);
+  --game-faint: rgba(221, 216, 204, 0.55);
+  --game-rule: rgba(221, 216, 204, 0.12);
+  --game-rule-strong: rgba(221, 216, 204, 0.3);
+  --game-blue: #c4892a;
+  --game-blue-soft: rgba(196, 137, 42, 0.16);
+  --game-rust: #c96a4e;
+  --game-rust-soft: rgba(201, 106, 78, 0.16);
+  --game-green: #8fa65a;
+  --game-green-soft: rgba(143, 166, 90, 0.16);
+  --game-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+  --game-serif: Georgia, "Songti SC", "STSong", "Noto Serif CJK SC", serif;
   --game-mono:
-    "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+    "Roboto Flex", "SFMono-Regular", "Cascadia Code", "Roboto Mono",
+    ui-monospace, monospace;
   position: fixed;
   inset: 0;
   z-index: 30;
@@ -54,6 +57,96 @@
   bottom: max(12px, env(safe-area-inset-bottom));
 }
 
+/* game 模式下实验 HUD 三件套换暗肤，对齐开场游客壳；
+   aquarium/experiment 模式保留 index.html 里的浅色原样。 */
+#app[data-project="game"] #fish-inspector {
+  border-color: rgba(221, 216, 204, 0.3);
+  color: rgba(221, 216, 204, 0.68);
+  box-shadow:
+    0 14px 38px rgba(0, 0, 0, 0.5),
+    inset 3px 0 #c4892a;
+}
+#app[data-project="game"] #fish-inspector header {
+  border-bottom-color: rgba(221, 216, 204, 0.12);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(196, 137, 42, 0.08) 0,
+      rgba(196, 137, 42, 0.08) 1px,
+      transparent 1px,
+      transparent 5px
+    ),
+    #0f0e0c;
+}
+#app[data-project="game"] #fish-inspector .fish-inspector-index {
+  color: rgba(221, 216, 204, 0.55);
+}
+#app[data-project="game"] #fish-inspector-close {
+  color: rgba(221, 216, 204, 0.68);
+}
+#app[data-project="game"] #fish-preview-viewport {
+  border-bottom-color: rgba(221, 216, 204, 0.12);
+}
+#app[data-project="game"] #fish-preview-viewport::after {
+  border-color: rgba(221, 216, 204, 0.22);
+  box-shadow:
+    12px 0 0 -11px rgba(196, 137, 42, 0.55),
+    -12px 0 0 -11px rgba(196, 137, 42, 0.55);
+}
+#app[data-project="game"] #fish-preview-viewport > span {
+  color: #ddd8cc;
+  background: rgba(15, 14, 12, 0.72);
+}
+#app[data-project="game"] .fish-inspector-copy {
+  background: rgba(15, 14, 12, 0.94);
+}
+#app[data-project="game"] .fish-inspector-copy strong {
+  color: #ddd8cc;
+}
+#app[data-project="game"] .fish-inspector-copy span {
+  color: rgba(221, 216, 204, 0.55);
+}
+#app[data-project="game"] .fish-inspector-actions {
+  border-top-color: rgba(221, 216, 204, 0.12);
+  background: rgba(221, 216, 204, 0.12);
+}
+#app[data-project="game"] .fish-inspector-actions button {
+  background: #1a1815;
+  color: rgba(221, 216, 204, 0.68);
+}
+#app[data-project="game"] .fish-inspector-actions button:first-child {
+  background: rgba(196, 137, 42, 0.2);
+  color: #ddd8cc;
+}
+#app[data-project="game"] .fish-inspector-actions button:hover {
+  background: rgba(196, 137, 42, 0.32);
+}
+#app[data-project="game"] #fish-view-hud {
+  border-left-color: #c4892a;
+  color: #ddd8cc;
+  background: rgba(15, 14, 12, 0.86);
+}
+#app[data-project="game"] #fish-view-hud span {
+  color: rgba(221, 216, 204, 0.55);
+}
+#app[data-project="game"] #fish-view-hud kbd {
+  color: #c4892a;
+}
+#app[data-project="game"] #time-shortcut-hud {
+  border-color: rgba(221, 216, 204, 0.22);
+  color: rgba(221, 216, 204, 0.68);
+  background: rgba(15, 14, 12, 0.9);
+}
+#app[data-project="game"] #time-shortcut-hud strong {
+  border-color: rgba(196, 137, 42, 0.45);
+  color: #ddd8cc;
+  background: rgba(196, 137, 42, 0.16);
+}
+#app[data-project="game"] #time-shortcut-hud[data-paused="true"] strong {
+  border-color: rgba(201, 106, 78, 0.6);
+  color: #c96a4e;
+}
+
 /* 特写/跟随全屏时收起档案面板，只留钟面和 ESC 提示。 */
 #app:is([data-camera-mode="closeup"], [data-camera-mode="follow"])
   :is(.game-ui__layout, .game-ui__wash) {
@@ -71,8 +164,8 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(244, 239, 230, 0.9), transparent 27%),
-    linear-gradient(270deg, rgba(244, 239, 230, 0.84), transparent 42%);
+    linear-gradient(90deg, rgba(15, 14, 12, 0.9), transparent 27%),
+    linear-gradient(270deg, rgba(15, 14, 12, 0.84), transparent 42%);
   opacity: 0.7;
   pointer-events: none;
 }
@@ -154,7 +247,7 @@
 .game-ui__clock svg {
   width: 76px;
   height: 76px;
-  filter: drop-shadow(0 8px 22px rgba(41, 63, 77, 0.22));
+  filter: drop-shadow(0 8px 22px rgba(0, 0, 0, 0.5));
 }
 
 .game-ui__clock-face {
@@ -235,7 +328,7 @@
   min-width: 0;
   padding: 18px 0 18px 14px;
   border-left: 1px solid var(--game-rule-strong);
-  filter: drop-shadow(0 10px 24px rgba(41, 63, 77, 0.08));
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.35));
 }
 
 .game-ui__lineage-rail::before,
@@ -332,7 +425,7 @@
   border-color: var(--game-blue);
   color: var(--game-paper-solid);
   background: var(--game-blue);
-  box-shadow: 0 0 0 4px rgba(55, 108, 134, 0.12);
+  box-shadow: 0 0 0 4px rgba(196, 137, 42, 0.18);
 }
 
 .game-ui__generation[data-state="complete"] .game-ui__generation-marker {
@@ -380,8 +473,8 @@
   scrollbar-color: var(--game-rule-strong) transparent;
   border: 1px solid var(--game-rule-strong);
   background:
-    linear-gradient(rgba(55, 108, 134, 0.035) 1px, transparent 1px) 0 0 / 100% 25px,
-    radial-gradient(circle at 102% -2%, rgba(55, 108, 134, 0.1), transparent 32%),
+    linear-gradient(rgba(221, 216, 204, 0.045) 1px, transparent 1px) 0 0 / 100% 25px,
+    radial-gradient(circle at 102% -2%, rgba(196, 137, 42, 0.1), transparent 32%),
     var(--game-paper);
   box-shadow: var(--game-shadow);
   pointer-events: auto;
@@ -392,7 +485,7 @@
   position: absolute;
   inset: 6px;
   z-index: 0;
-  border: 1px solid rgba(131, 159, 171, 0.32);
+  border: 1px solid rgba(221, 216, 204, 0.18);
   content: "";
   pointer-events: none;
 }
@@ -490,7 +583,7 @@
   border-block: 1px solid var(--game-rule);
   padding: 0 24px;
   color: var(--game-muted);
-  background: rgba(220, 235, 242, 0.45);
+  background: rgba(196, 137, 42, 0.08);
   font-size: 7px;
   letter-spacing: 0.13em;
 }
@@ -540,7 +633,7 @@
   gap: 12px;
   border-left: 3px solid var(--game-rust);
   padding: 9px 10px;
-  background: rgba(240, 222, 216, 0.52);
+  background: rgba(201, 106, 78, 0.12);
 }
 
 .game-ui__objective span {
@@ -559,7 +652,7 @@
   grid-template-columns: 1.2fr 1fr 0.9fr;
   border-block: 1px solid var(--game-rule);
   margin: 0 24px;
-  background: rgba(247, 242, 234, 0.66);
+  background: rgba(26, 24, 21, 0.66);
 }
 
 .game-ui__metric {
@@ -639,7 +732,7 @@
 }
 
 .game-ui[data-result="lost"] .game-ui__result {
-  border-color: rgba(147, 77, 64, 0.55);
+  border-color: rgba(201, 106, 78, 0.55);
   background: var(--game-rust-soft);
 }
 
@@ -696,7 +789,7 @@
   place-items: center;
   min-width: 50px;
   padding: 6px;
-  background: rgba(247, 242, 234, 0.72);
+  background: rgba(15, 14, 12, 0.72);
 }
 
 .game-ui__death-log dt {
@@ -754,7 +847,7 @@
   height: 7px;
   border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 0 3px rgba(82, 108, 50, 0.12);
+  box-shadow: 0 0 0 3px rgba(143, 166, 90, 0.18);
 }
 
 .game-ui__lock-state strong {
@@ -783,7 +876,7 @@
 .game-ui__coefficient-ledger {
   min-width: 0;
   border: 1px solid var(--game-rule);
-  background: rgba(247, 242, 234, 0.76);
+  background: rgba(26, 24, 21, 0.76);
 }
 
 .game-ui__triangle-card {
@@ -817,12 +910,12 @@
 }
 
 .game-ui__triangle-plane pattern path {
-  stroke: rgba(55, 108, 134, 0.3);
+  stroke: rgba(196, 137, 42, 0.3);
   stroke-width: 0.38;
 }
 
 .game-ui__triangle-fill {
-  fill: rgba(220, 235, 242, 0.75);
+  fill: rgba(196, 137, 42, 0.12);
 }
 
 .game-ui__triangle-grid {
@@ -831,7 +924,7 @@
 
 .game-ui__triangle-axis {
   fill: none;
-  stroke: rgba(55, 108, 134, 0.43);
+  stroke: rgba(196, 137, 42, 0.43);
   stroke-dasharray: 1.8 2.2;
   stroke-width: 0.48;
   vector-effect: non-scaling-stroke;
@@ -880,7 +973,7 @@
   background: currentColor;
   box-shadow:
     0 0 0 1px currentColor,
-    0 4px 10px rgba(41, 63, 77, 0.24);
+    0 4px 10px rgba(0, 0, 0, 0.45);
   transition:
     transform 160ms ease,
     box-shadow 160ms ease;
@@ -906,8 +999,8 @@
 .game-ui__triangle-handle:hover span,
 .game-ui__triangle-handle:focus-visible span {
   box-shadow:
-    0 0 0 5px rgba(147, 77, 64, 0.14),
-    0 4px 10px rgba(41, 63, 77, 0.24);
+    0 0 0 5px rgba(201, 106, 78, 0.2),
+    0 4px 10px rgba(0, 0, 0, 0.45);
   transform: scale(1.08);
 }
 
@@ -980,7 +1073,7 @@
   min-height: 27px;
   padding: 0 7px;
   color: var(--game-muted);
-  background: rgba(220, 235, 242, 0.54);
+  background: rgba(196, 137, 42, 0.1);
   font-size: 6px;
   letter-spacing: 0.08em;
   text-align: right;
@@ -1039,8 +1132,8 @@
   background:
     repeating-linear-gradient(
       135deg,
-      rgba(88, 112, 128, 0.035) 0,
-      rgba(88, 112, 128, 0.035) 2px,
+      rgba(221, 216, 204, 0.045) 0,
+      rgba(221, 216, 204, 0.045) 2px,
       transparent 2px,
       transparent 7px
     );
@@ -1114,7 +1207,7 @@
 .game-ui__button:hover {
   color: var(--game-blue);
   background: var(--game-paper-solid);
-  box-shadow: 4px 4px 0 rgba(55, 108, 134, 0.18);
+  box-shadow: 4px 4px 0 rgba(196, 137, 42, 0.22);
   transform: translate(-1px, -1px);
 }
 
@@ -1146,7 +1239,7 @@
   height: 8px;
   border-radius: 50%;
   background: var(--game-blue);
-  box-shadow: 0 0 0 4px rgba(55, 108, 134, 0.12);
+  box-shadow: 0 0 0 4px rgba(196, 137, 42, 0.18);
   animation: game-ui-recording 1.8s ease-in-out infinite;
 }
 
@@ -1162,7 +1255,7 @@
 
 #game-ui-root button:focus-visible,
 #game-ui-root input:focus-visible {
-  outline: 3px solid #1f5d7b;
+  outline: 3px solid #c4892a;
   outline-offset: 3px;
 }
 
@@ -1214,7 +1307,7 @@
 
 @container game-ui (max-width: 540px) {
   .game-ui__wash {
-    background: rgba(244, 239, 230, 0.58);
+    background: rgba(15, 14, 12, 0.58);
   }
 
   .game-ui__layout {
