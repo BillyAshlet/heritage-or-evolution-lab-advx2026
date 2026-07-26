@@ -26,7 +26,7 @@ export const VISITOR_OWNED_SCREENS = Object.freeze([
 ]);
 
 const TITLE_MEDIA = Object.freeze({
-  // Web-compressed asset committed under output/video/. The 30–40 MB .mov
+  // Web-compressed asset published from public/output/video/. The 30–40 MB .mov
   // masters stay out via .gitignore, so this can run enabled.
   src: '/output/video/inheritance-lab-loop.m4v',
   enabled: true,
