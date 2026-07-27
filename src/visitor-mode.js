@@ -59,6 +59,7 @@ const COPY = Object.freeze({
     subtitle: '进化与遗传的代价',
     start: '开始体验',
     settings: '设置',
+    developer: '开发者模式',
     concept: '作品理念',
     credits: '团队',
     back: '返回',
@@ -99,6 +100,7 @@ const COPY = Object.freeze({
     subtitle: 'The Price of Evolution',
     start: 'Begin',
     settings: 'Settings',
+    developer: 'Developer Mode',
     concept: 'Concept',
     credits: 'Team',
     back: 'Back',
@@ -754,6 +756,7 @@ export function mountVisitorMode({
   levels = [],
   initialLanguage = defaultLanguage(),
   onBeginExperience = () => {},
+  onEnterDeveloperMode = () => {},
   onEnterLevel = () => {},
   onReturnToTitle = () => {},
   onScreenChange = () => {},
@@ -837,6 +840,9 @@ export function mountVisitorMode({
           </button>
           <button class="vo-menu-link" data-action="settings" type="button">
             <span class="vo-menu-link__idx">03</span><span data-fx="letters">${escapeHtml(t('settings'))}</span>
+          </button>
+          <button class="vo-menu-link" data-action="developer" type="button">
+            <span class="vo-menu-link__idx">04</span><span data-fx="letters">${escapeHtml(t('developer'))}</span>
           </button>
         </nav>
       </div>
@@ -1095,6 +1101,15 @@ export function mountVisitorMode({
     }
     if (action === 'settings') {
       setScreen(VISITOR_SCREEN.SETTINGS, 'ccw');
+      return;
+    }
+    if (action === 'developer') {
+      try {
+        onEnterDeveloperMode();
+        hide({ animate: true });
+      } catch (error) {
+        console.error('[visitor shell] Failed to enter developer mode.', error);
+      }
       return;
     }
     if (action === 'concept') {

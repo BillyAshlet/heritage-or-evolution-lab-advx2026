@@ -13,3 +13,8 @@ godot/
 # 视频源文件（.mov 单个 30-40MB）不进仓库，只提交压好的 mp4
 output/**/*.mov
 output/imagegen/
+
+# 工具与临时产物（tmp/pdfs 约 29MB，pycache 是字节码）
+tmp/
+tools/__pycache__/
+.qoder-shots/

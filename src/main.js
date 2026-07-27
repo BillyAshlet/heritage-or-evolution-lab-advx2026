@@ -516,6 +516,16 @@ async function bootstrap() {
     installGameScene({ newAttempt: true });
   }
 
+  function enterDeveloperMode() {
+    gameUiRevealed = false;
+    if (current.runtime.project === 'game') {
+      stage.runtime.project = 'aquarium';
+      controller.applyConfig('rebuildScene', 'runtime.project');
+    }
+    debug.rebuildPane();
+    syncProjectPresentation(true);
+  }
+
   function revealVisitorLevel(levelIndex) {
     if (
       gameSession.phase !== GAME_PHASE.TUNING ||
@@ -615,6 +625,7 @@ async function bootstrap() {
     root: app,
     levels: LEVEL_SPECS,
     onBeginExperience: beginVisitorExperience,
+    onEnterDeveloperMode: enterDeveloperMode,
     onEnterLevel: revealVisitorLevel,
     onReturnToTitle: returnToVisitorTitle,
     onScreenChange() {
