@@ -25,28 +25,36 @@ export const VISITOR_OWNED_SCREENS = Object.freeze([
   VISITOR_SCREEN.END,
 ]);
 
+// Resolves a public/ asset against the deploy base. Vite rewrites asset
+// URLs it can see in CSS/HTML, but NOT string literals in JS — a bare
+// '/output/video/x.m4v' stays absolute and 404s wherever the site is not
+// served from the domain root (project pages, /downstream/ subpaths...),
+// which looks exactly like "the video never loads" on the deployed build.
+const asset = (path) =>
+  `${import.meta.env.BASE_URL}${path}`.replace(/([^:])\/{2,}/g, '$1/');
+
 const TITLE_MEDIA = Object.freeze({
   // Web-compressed asset published from public/output/video/. The 30–40 MB .mov
   // masters stay out via .gitignore, so this can run enabled.
-  src: '/output/video/inheritance-lab-loop.m4v',
+  src: asset('output/video/inheritance-lab-loop.m4v'),
   enabled: true,
 });
 
 const FALLBACK_LEVEL_MEDIA = Object.freeze([
   Object.freeze({
-    src: '/output/video/predator-shadow-loop.m4v',
+    src: asset('output/video/predator-shadow-loop.m4v'),
     enabled: true,
     tone: 'dark',
     flipY: true,
   }),
   Object.freeze({
-    src: '/output/video/golden-age-pixel-dawn-loop.m4v',
+    src: asset('output/video/golden-age-pixel-dawn-loop.m4v'),
     enabled: true,
     tone: 'bright',
     flipY: true,
   }),
   Object.freeze({
-    src: '/output/video/drained-paradise-loop.m4v',
+    src: asset('output/video/drained-paradise-loop.m4v'),
     enabled: true,
     tone: 'dark',
     flipY: true,
