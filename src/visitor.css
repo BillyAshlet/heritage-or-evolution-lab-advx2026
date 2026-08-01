@@ -512,6 +512,9 @@
 }
 .vo-menu-link:hover { color: var(--v-text); transform: translateX(4px); }
 .vo-menu-link:hover .vo-menu-link__idx { opacity: 1; }
+/* The PDF entry is an <a download>, so it needs the underline reset that
+   <button> gets for free. Everything else already matches. */
+a.vo-menu-link { text-decoration: none; }
 
 /* ── SUBSCREEN base (settings, concept, credits) ──────────────────────── */
 .vo-subscreen {

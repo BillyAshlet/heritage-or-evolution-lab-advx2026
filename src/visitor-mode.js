@@ -33,6 +33,13 @@ export const VISITOR_OWNED_SCREENS = Object.freeze([
 const asset = (path) =>
   `${import.meta.env.BASE_URL}${path}`.replace(/([^:])\/{2,}/g, '$1/');
 
+// A6 reading brochure, published to public/output/pdf/. Downloaded via
+// the title menu; goes through asset() so it resolves on any deploy base.
+const BROCHURE_PDF = Object.freeze({
+  src: asset('output/pdf/downstream-brochure-reading-a6.pdf'),
+  filename: 'Downstream-下游-introduction.pdf',
+});
+
 const TITLE_MEDIA = Object.freeze({
   // Web-compressed asset published from public/output/video/. The 30–40 MB .mov
   // masters stay out via .gitignore, so this can run enabled.
@@ -68,6 +75,7 @@ const COPY = Object.freeze({
     start: '开始体验',
     settings: '设置',
     developer: '开发者模式',
+    moreAbout: '了解更多（下载介绍册）',
     concept: '作品理念',
     credits: '团队',
     back: '返回',
@@ -109,6 +117,7 @@ const COPY = Object.freeze({
     start: 'Begin',
     settings: 'Settings',
     developer: 'Developer Mode',
+    moreAbout: 'More About (Download Introduction PDF)',
     concept: 'Concept',
     credits: 'Team',
     back: 'Back',
@@ -852,6 +861,10 @@ export function mountVisitorMode({
           <button class="vo-menu-link" data-action="developer" type="button">
             <span class="vo-menu-link__idx">04</span><span data-fx="letters">${escapeHtml(t('developer'))}</span>
           </button>
+          <a class="vo-menu-link" href="${escapeHtml(BROCHURE_PDF.src)}"
+             download="${escapeHtml(BROCHURE_PDF.filename)}">
+            <span class="vo-menu-link__idx">05</span><span data-fx="letters">${escapeHtml(t('moreAbout'))}</span>
+          </a>
         </nav>
       </div>
     `;
