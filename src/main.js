@@ -516,10 +516,17 @@ async function bootstrap() {
     installGameScene({ newAttempt: true });
   }
 
+  // Developer mode always lands on the map/rigid-body experiment: it is the
+  // most legible preview of the simulation. Entering dev mode is always a
+  // fresh entry from the visitor menu, so this is unconditional — the old
+  // 'only redirect away from game' check never fired, because the runtime
+  // sits on 'aquarium' while the visitor shell is showing.
+  const DEVELOPER_LANDING_PROJECT = 'obstacle';
+
   function enterDeveloperMode() {
     gameUiRevealed = false;
-    if (current.runtime.project === 'game') {
-      stage.runtime.project = 'aquarium';
+    if (current.runtime.project !== DEVELOPER_LANDING_PROJECT) {
+      stage.runtime.project = DEVELOPER_LANDING_PROJECT;
       controller.applyConfig('rebuildScene', 'runtime.project');
     }
     debug.rebuildPane();
