@@ -130,3 +130,17 @@ Game 玩家不会直接看到这张完整参数表。
 
 完整实施约束见 [EXPERIMENT-DEVELOPMENT.md](./EXPERIMENT-DEVELOPMENT.md)，
 分支架构优先级见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+
+## 许可 / License
+
+本作品采用**双许可**：
+
+- **软件**（`src/**/*.js`、`tools/**`、构建配置）— **GPL-3.0**，见 [`LICENSE`](./LICENSE)
+- **创意内容**（设计与概念文档、三关叙事文案、视觉与影音资产、手册）—
+  **CC BY-NC 4.0**，见 [`LICENSE-CONTENT.txt`](./LICENSE-CONTENT.txt)。
+  署名与非商业性使用为强制条件；商业使用需事先书面许可。
+
+内嵌在源码文件中的叙事文案与概念文本，其著作权按创意内容处理。
+
+著作权归属、分工说明，以及**关于 git 提交作者字段不代表设计归属的重要
+说明**，见 [`NOTICE.md`](./NOTICE.md)。
