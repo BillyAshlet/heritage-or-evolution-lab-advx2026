@@ -34,6 +34,78 @@ const LOCOMOTION_LABEL = Object.freeze([
   'evade',
 ]);
 
+// ── 性状可读性：只影响外观，不参与任何判定 ──────────────────────────
+// 三角形控制器把权重映射成系数时中段很平（w≥1/3 时 m = 0.75+0.75w），
+// 拖到一半只有 ×1.1~1.2 —— 在 1.5 的基数上是 10% 的变化，肉眼分不出。
+// 下面两组常数把"玩家选了什么"放大到看得见，判定继续用真实数值。
+// 三个常数都可以设为关闭值，出问题直接回滚。
+
+// 体型：视觉尺寸 = 锚点 × (真实尺寸 / 锚点) ^ γ × 全局倍率
+//
+// 为什么是"抬地板 + 压指数"这个组合：
+//   浮游颗粒 pointSize = 0.03；鱼的视觉长度 = 0.046 × 视觉尺寸。
+//   玩家把体型让给速度/耐力时真实体型 0.75，旧参数(γ=1.8)算出来的
+//   视觉长度正好也是 0.030 —— 和浮游一模一样，鱼消失在食物里。
+//   但只抬地板不压指数会让另一端爆炸：要让最小的鱼达到浮游 3 倍，
+//   红鱼会涨到 0.65 m，而缸只有 6 m 宽。两件事必须一起做。
+//
+// γ<1 把两端都朝锚点收拢，最小的不消失、最大的不塞满缸；全局倍率
+// 再把整体抬起来。绝对尺寸变大后，同样百分比的变化反而更容易看见
+// （0.15 m 的鱼变化 20% 一眼可见，0.03 m 的看不出来）。
+//
+// 判定完全不受影响：捕食半径、谁吃谁、代谢、速度惩罚读的都是
+// school.size；这里只改 setMatrixAt 的缩放。γ=1 且全局=1 即关闭。
+// 结论：用线性（γ=1），靠【全局放大】而不是靠指数解决可见性。
+//   试过 γ=1.8（放大差距）会让最小的鱼掉到浮游大小；试过 γ=0.9
+//   （压缩两端）效果和线性几乎相同，却要多一个概念。线性还白拿三点：
+//   ① 视觉不撒谎，看起来两倍大就是真的两倍大，比例精确保留；
+//   ② "玩家拉满体型 == 大群"这个相等关系保住（指数会破坏它），
+//      而那正是叙事上的高光时刻；③ 只剩一个旋钮。
+//   可见性由绝对尺寸保证：0.18 m 的鱼变化 20% 一眼可见，
+//   0.03 m 的看不出来 —— 所以把基准做大本身就够了。
+const VISUAL_SIZE_EXPONENT = 1; // 1 = 线性。改成 ≠1 会启用非线性映射
+const VISUAL_SIZE_ANCHOR = 1.5; // 仅当 γ≠1 时作为映射锚点
+const VISUAL_SIZE_GLOBAL = 2.6; // ← 唯一要调的旋钮：全体视觉放大倍率
+
+// 逐鱼群微调，在上面之后再乘。现在三群一致；要单独放大某群改这里。
+const VISUAL_SIZE_BOOST = Object.freeze({
+  small: 1,
+  medium: 1,
+  large: 1,
+});
+
+// 代谢明度：把 school.metabolismMultiplier 映射成亮度。这是【性状】
+// 不是【状态】—— 由玩家选择决定、一局内恒定，所以拖三角形的当下就能
+// 看见（当前能量是逐帧变化的，只在 RUNNING 有意义，此处不用）。
+// 0 关闭染色；log2 让 ×0.22 与 ×2.66 对称落在两侧。
+const METABOLISM_TINT_STRENGTH = 0.35;
+const METABOLISM_TINT_OCTAVE_CLAMP = 2; // ±2 个倍频程封顶
+
+function visualSizeOf(size, schoolId) {
+  const boost = (VISUAL_SIZE_BOOST[schoolId] ?? 1) * VISUAL_SIZE_GLOBAL;
+  if (VISUAL_SIZE_EXPONENT === 1) return size * boost;
+  const ratio = Math.max(EPSILON, size / VISUAL_SIZE_ANCHOR);
+  return VISUAL_SIZE_ANCHOR * ratio ** VISUAL_SIZE_EXPONENT * boost;
+}
+
+// 代谢高 → 更亮更躁；低 → 更沉。×1 时原色返回。
+function metabolismTint(baseColor, metabolismMultiplier, out) {
+  out.copy(baseColor);
+  if (METABOLISM_TINT_STRENGTH === 0) return out;
+  const value = Number.isFinite(metabolismMultiplier)
+    ? metabolismMultiplier
+    : 1;
+  if (value <= EPSILON) return out;
+  const octaves = clamp(
+    Math.log2(value),
+    -METABOLISM_TINT_OCTAVE_CLAMP,
+    METABOLISM_TINT_OCTAVE_CLAMP
+  );
+  const factor =
+    1 + (METABOLISM_TINT_STRENGTH * octaves) / METABOLISM_TINT_OCTAVE_CLAMP;
+  return out.multiplyScalar(Math.max(0.05, factor));
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -244,11 +316,17 @@ export class ExperimentSimulation {
     this.mesh = new THREE.InstancedMesh(geometry, material, this.count);
     this.mesh.name = 'experiment-fish';
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    const buildTint = new THREE.Color();
     for (let index = 0; index < this.count; index += 1) {
-      const color = new THREE.Color(
-        this.config.schools[this.schoolIds[index]].color
+      const school = this.config.schools[this.schoolIds[index]];
+      this.mesh.setColorAt(
+        index,
+        metabolismTint(
+          new THREE.Color(school.color),
+          school.metabolismMultiplier,
+          buildTint
+        )
       );
-      this.mesh.setColorAt(index, color);
     }
     this.mesh.instanceColor.needsUpdate = true;
     this.mesh.frustumCulled = false;
@@ -562,10 +640,18 @@ export class ExperimentSimulation {
     if (this.mesh) {
       this.mesh.material.opacity = config.visual.opacity;
       this.mesh.material.transparent = config.visual.opacity < 1;
+      // 代谢明度在这里重算：拖三角形会走 applyConfig('live') 到这条
+      // 路径，所以"选了什么"当场就反映到颜色上，且每帧零开销。
+      const liveTint = new THREE.Color();
       for (let index = 0; index < this.count; index += 1) {
+        const school = config.schools[this.schoolIds[index]];
         this.mesh.setColorAt(
           index,
-          new THREE.Color(config.schools[this.schoolIds[index]].color)
+          metabolismTint(
+            new THREE.Color(school.color),
+            school.metabolismMultiplier,
+            liveTint
+          )
         );
       }
       this.mesh.instanceColor.needsUpdate = true;
@@ -2063,8 +2149,8 @@ export class ExperimentSimulation {
         if (this.corpse[index]) {
           const schoolIndex = this.schoolIds[index];
           const school = this.config.schools[schoolIndex];
-          // 尺寸就是鱼自身的体型
-          scale.setScalar(school.size);
+          // 尺寸就是鱼自身的体型（同样走视觉放大，死后不该突然改变大小）
+          scale.setScalar(visualSizeOf(school.size, school.id));
           const fade = Math.max(
             0.01,
             this.config.ecology.corpseFadeTime ?? 1.6
@@ -2096,7 +2182,8 @@ export class ExperimentSimulation {
         }
       } else {
         const school = this.config.schools[this.schoolIds[index]];
-        scale.setScalar(school.size);
+        // 视觉放大：判定用 school.size，画面用 visualSizeOf(size)
+        scale.setScalar(visualSizeOf(school.size, school.id));
         direction
           .set(
             this.velocities[offset],

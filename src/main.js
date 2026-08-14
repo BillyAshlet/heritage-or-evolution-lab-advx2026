@@ -329,9 +329,14 @@ async function bootstrap() {
     } else {
       delete app.dataset.gameAttemptSeed;
     }
+    // TUNING 也开放快慢键：调参恰恰是最需要放慢观察的时刻，原来只在
+    // RUNNING 启用，等于"能看清的时候已经改不了了"。TUNING 期间倒计时
+    // 与生态都不推进，变速只影响观察，不触及任何判定。
     timeShortcuts?.setEnabled(
       !visitorBlocking &&
-        (!isGame || gameSession.phase === GAME_PHASE.RUNNING)
+        (!isGame ||
+          gameSession.phase === GAME_PHASE.RUNNING ||
+          gameSession.phase === GAME_PHASE.TUNING)
     );
     // 点鱼观察窗链路在 game 模式同样开放（单击鱼 → 观察窗 → 特写/跟随
     // → ESC/双击空格回全局），只在游客壳遮挡时禁用。
