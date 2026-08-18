@@ -7,10 +7,26 @@ export const CAMERA_MODE = Object.freeze({
   GLOBAL: 'global',
   CLOSEUP: 'closeup',
   FOLLOW: 'follow',
+  // ORBIT：跟随鱼的【位置】，但视角由玩家自由拖动。
+  // CLOSEUP 和 FOLLOW 的机位都由 frame.forward 推出来，等于死锁在鱼头
+  // 朝向上 —— 鱼一转弯整个世界跟着转，想绕着鱼看一圈是做不到的。
+  // 教学关要让玩家自己转着看体型差异，必须有一个世界坐标系不动的模式。
+  ORBIT: 'orbit',
 });
 
 export function cameraModeAfterEscape(mode) {
   return mode === CAMERA_MODE.GLOBAL ? CAMERA_MODE.GLOBAL : CAMERA_MODE.GLOBAL;
+}
+
+const ORBIT_YAW_PER_PIXEL = 0.0065;
+const ORBIT_PITCH_PER_PIXEL = 0.0055;
+const ORBIT_PITCH_LIMIT = 1.45; // 略小于 π/2，避免正上/正下时 lookAt 退化
+const ORBIT_ZOOM_PER_DELTA = 0.0012;
+const ORBIT_DISTANCE_MIN = 0.16;
+const ORBIT_DISTANCE_MAX = 3.2;
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function dampAlpha(rate, dt) {
@@ -29,6 +45,8 @@ export class ExperimentCameraController {
     this.dragPointer = null;
     this.dragStart = null;
     this.savedPose = null;
+    // 绕轨视角状态：yaw/pitch 是世界坐标系下的球面角，不随鱼头朝向变化
+    this.orbit = { yaw: 0, pitch: 0.28, distance: 0.9 };
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.previewCamera = new THREE.PerspectiveCamera(34, 1, 0.01, 10);
@@ -76,6 +94,7 @@ export class ExperimentCameraController {
       <div class="fish-inspector-actions" role="group" aria-label="鱼观察视角">
         <button type="button" id="fish-enter-closeup">特写视角 · 全屏</button>
         <button type="button" id="fish-enter-follow">跟随视角 · 全屏</button>
+        <button type="button" id="fish-enter-orbit">绕看视角 · 全屏</button>
       </div>
     `;
     document.getElementById('app').appendChild(inspector);
@@ -88,6 +107,9 @@ export class ExperimentCameraController {
     inspector
       .querySelector('#fish-enter-follow')
       .addEventListener('click', () => this.enterFollow());
+    inspector
+      .querySelector('#fish-enter-orbit')
+      .addEventListener('click', () => this.enterOrbit());
     return inspector;
   }
 
@@ -110,7 +132,7 @@ export class ExperimentCameraController {
       if (
         !this.interactionEnabled ||
         event.button !== 0 ||
-        this.mode !== CAMERA_MODE.GLOBAL
+        (this.mode !== CAMERA_MODE.GLOBAL && this.mode !== CAMERA_MODE.ORBIT)
       ) {
         return;
       }
@@ -124,6 +146,20 @@ export class ExperimentCameraController {
     });
     canvas.addEventListener('pointermove', (event) => {
       if (event.pointerId !== this.dragPointer || !this.dragStart) return;
+      if (this.mode === CAMERA_MODE.ORBIT) {
+        const dx = event.clientX - this.dragStart.x;
+        const dy = event.clientY - this.dragStart.y;
+        this.dragStart.x = event.clientX;
+        this.dragStart.y = event.clientY;
+        this.dragStart.moved = true;
+        this.orbit.yaw -= dx * ORBIT_YAW_PER_PIXEL;
+        this.orbit.pitch = clampNumber(
+          this.orbit.pitch + dy * ORBIT_PITCH_PER_PIXEL,
+          -ORBIT_PITCH_LIMIT,
+          ORBIT_PITCH_LIMIT
+        );
+        return;
+      }
       if (
         Math.hypot(
           event.clientX - this.dragStart.x,
@@ -143,6 +179,19 @@ export class ExperimentCameraController {
         this._handleClick(event);
       }
     });
+    canvas.addEventListener(
+      'wheel',
+      (event) => {
+        if (!this.interactionEnabled || this.mode !== CAMERA_MODE.ORBIT) return;
+        event.preventDefault();
+        this.orbit.distance = clampNumber(
+          this.orbit.distance * Math.exp(event.deltaY * ORBIT_ZOOM_PER_DELTA),
+          ORBIT_DISTANCE_MIN,
+          ORBIT_DISTANCE_MAX
+        );
+      },
+      { passive: false }
+    );
     window.addEventListener('keydown', (event) => {
       // 演示卫生：一键收掉全部调试 UI。路演、截图、录屏都需要。
       // 注意：数字键 0/1/3/7 已被 scene.js 的 Blender 风格视角预设占用
@@ -265,7 +314,10 @@ export class ExperimentCameraController {
     this.viewHud.querySelector('#fish-view-mode').textContent =
       mode === CAMERA_MODE.CLOSEUP
         ? 'FULLSCREEN · CLOSE-UP'
-        : 'FULLSCREEN · FOLLOW';
+        : mode === CAMERA_MODE.ORBIT
+          ? 'FULLSCREEN · ORBIT · 拖动旋转 / 滚轮缩放'
+          : 'FULLSCREEN · FOLLOW';
+    if (mode === CAMERA_MODE.ORBIT) this._seedOrbitFromCamera();
     this.presentation.cameraSettings.orbitEnabled = false;
     this.simulation.setHiddenFish(-1);
     return true;
@@ -279,6 +331,33 @@ export class ExperimentCameraController {
   enterFollow(index = this.selected) {
     if (index !== this.selected && !this.select(index)) return false;
     return this._enterMode(CAMERA_MODE.FOLLOW);
+  }
+
+  enterOrbit(index = this.selected) {
+    if (index !== this.selected && !this.select(index)) return false;
+    return this._enterMode(CAMERA_MODE.ORBIT);
+  }
+
+  // 从当前机位反推球面角，避免进入 ORBIT 的瞬间视角跳变
+  _seedOrbitFromCamera() {
+    const fish = this.simulation.fish(this.selected);
+    if (!fish) return;
+    const offset = this.camera.position
+      .clone()
+      .sub(new THREE.Vector3(...fish.position));
+    const length = offset.length();
+    if (length < 1e-4) return;
+    this.orbit.distance = clampNumber(
+      length,
+      ORBIT_DISTANCE_MIN,
+      ORBIT_DISTANCE_MAX
+    );
+    this.orbit.yaw = Math.atan2(offset.x, offset.z);
+    this.orbit.pitch = clampNumber(
+      Math.asin(offset.y / length),
+      -ORBIT_PITCH_LIMIT,
+      ORBIT_PITCH_LIMIT
+    );
   }
 
   exitView(clearSelection = false) {
@@ -397,6 +476,28 @@ export class ExperimentCameraController {
     this.marker.visible = true;
     if (this.mode === CAMERA_MODE.CLOSEUP) {
       this._applyPose(this.camera, closeupPose, dt, config.closeupFov);
+      return;
+    }
+
+    if (this.mode === CAMERA_MODE.ORBIT) {
+      // 关键区别：偏移量在【世界坐标系】里算，不用 frame.forward。
+      // 鱼转弯时机位不动，玩家看到的是鱼在转，而不是世界在转。
+      const cos = Math.cos(this.orbit.pitch);
+      const orbitPosition = frame.position
+        .clone()
+        .add(
+          new THREE.Vector3(
+            this.orbit.distance * cos * Math.sin(this.orbit.yaw),
+            this.orbit.distance * Math.sin(this.orbit.pitch),
+            this.orbit.distance * cos * Math.cos(this.orbit.yaw)
+          )
+        );
+      this._applyPose(
+        this.camera,
+        { cameraPosition: orbitPosition, lookTarget: frame.position.clone() },
+        dt,
+        config.fov
+      );
       return;
     }
 
