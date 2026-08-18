@@ -74,12 +74,26 @@ const VISUAL_SIZE_BOOST = Object.freeze({
   large: 1,
 });
 
-// 代谢明度：把 school.metabolismMultiplier 映射成亮度。这是【性状】
-// 不是【状态】—— 由玩家选择决定、一局内恒定，所以拖三角形的当下就能
-// 看见（当前能量是逐帧变化的，只在 RUNNING 有意义，此处不用）。
-// 0 关闭染色；log2 让 ×0.22 与 ×2.66 对称落在两侧。
-const METABOLISM_TINT_STRENGTH = 0.35;
-const METABOLISM_TINT_OCTAVE_CLAMP = 2; // ±2 个倍频程封顶
+// 耐力明度：亮度 ∝ 【还能活多久】= 当前能量 ÷ 每秒代谢。
+//
+// 为什么是这个量而不是代谢倍率本身：
+//   耐力 → 代谢是倒数（代谢 ∝ 1/耐力），代谢 → 存活时间又是倒数
+//   （时间 = 能量/代谢），两个倒数抵消，所以【存活时间与耐力系数
+//   严格线性】—— 实测耐力 0.5/0.75/1.0/1.25/1.5 对应 22.6/33.9/
+//   45.2/56.5/67.8 秒，比值恒为 45.18。拖一半就是一半亮度。
+//
+// 而直接映射代谢倍率是错的：拉满速度时代谢 ×1.01、均衡 ×1.00 —— 明度
+// 纹丝不动；拉满体型却 ×2.66 大亮，可体型已经用尺寸表示了。等于明度
+// 变成第二根体型条，而速度轴完全隐形。
+//
+// 这一个量还同时解决了"性状 vs 状态"：TUNING 时能量恒满，亮度显示的
+// 是【这套选择能撑多久】；RUNNING 时能量下降，亮度就成了【现在还能
+// 撑多久】。一个通道，两层含义，且都是玩家真正关心的那个数。
+// 强度设 0 即关闭染色。
+const STAMINA_TINT_STRENGTH = 0.45;
+const STAMINA_TINT_REFERENCE_SECONDS = 45; // 均衡选择的续航，作为亮度基准
+const STAMINA_TINT_MIN = 0.35; // 濒死时最暗
+const STAMINA_TINT_MAX = 1.45; // 满耐力时最亮，防止过曝
 
 function visualSizeOf(size, schoolId) {
   const boost = (VISUAL_SIZE_BOOST[schoolId] ?? 1) * VISUAL_SIZE_GLOBAL;
@@ -88,22 +102,16 @@ function visualSizeOf(size, schoolId) {
   return VISUAL_SIZE_ANCHOR * ratio ** VISUAL_SIZE_EXPONENT * boost;
 }
 
-// 代谢高 → 更亮更躁；低 → 更沉。×1 时原色返回。
-function metabolismTint(baseColor, metabolismMultiplier, out) {
-  out.copy(baseColor);
-  if (METABOLISM_TINT_STRENGTH === 0) return out;
-  const value = Number.isFinite(metabolismMultiplier)
-    ? metabolismMultiplier
-    : 1;
-  if (value <= EPSILON) return out;
-  const octaves = clamp(
-    Math.log2(value),
-    -METABOLISM_TINT_OCTAVE_CLAMP,
-    METABOLISM_TINT_OCTAVE_CLAMP
+// 还能活多久 → 亮度倍率。撑得久 = 亮，快饿死 = 暗。
+function staminaTintFactor(survivalSeconds) {
+  if (STAMINA_TINT_STRENGTH === 0) return 1;
+  if (!Number.isFinite(survivalSeconds)) return STAMINA_TINT_MAX;
+  const relative = survivalSeconds / STAMINA_TINT_REFERENCE_SECONDS;
+  return clamp(
+    1 + STAMINA_TINT_STRENGTH * (relative - 1),
+    STAMINA_TINT_MIN,
+    STAMINA_TINT_MAX
   );
-  const factor =
-    1 + (METABOLISM_TINT_STRENGTH * octaves) / METABOLISM_TINT_OCTAVE_CLAMP;
-  return out.multiplyScalar(Math.max(0.05, factor));
 }
 
 function clamp(value, min, max) {
@@ -251,6 +259,8 @@ export class ExperimentSimulation {
     this.corpse = new Uint8Array(this.count);
     // 死后经过的秒数，驱动颜色渐变 / 翻身 / 上浮渐入
     this.corpseAge = new Float32Array(this.count);
+    // 上一次写入的耐力明度倍率，用来跳过没有变化的 setColorAt。
+    this.tintFactors = new Float32Array(this.count).fill(-1);
     this.corpseColor = new THREE.Color('#6b6f74');
     this.schoolColors = config.schools.map((sc) => new THREE.Color(sc.color));
     this.locomotionStates = new Uint8Array(this.count);
@@ -316,17 +326,9 @@ export class ExperimentSimulation {
     this.mesh = new THREE.InstancedMesh(geometry, material, this.count);
     this.mesh.name = 'experiment-fish';
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    const buildTint = new THREE.Color();
     for (let index = 0; index < this.count; index += 1) {
       const school = this.config.schools[this.schoolIds[index]];
-      this.mesh.setColorAt(
-        index,
-        metabolismTint(
-          new THREE.Color(school.color),
-          school.metabolismMultiplier,
-          buildTint
-        )
-      );
+      this.mesh.setColorAt(index, new THREE.Color(school.color));
     }
     this.mesh.instanceColor.needsUpdate = true;
     this.mesh.frustumCulled = false;
@@ -640,18 +642,11 @@ export class ExperimentSimulation {
     if (this.mesh) {
       this.mesh.material.opacity = config.visual.opacity;
       this.mesh.material.transparent = config.visual.opacity < 1;
-      // 代谢明度在这里重算：拖三角形会走 applyConfig('live') 到这条
-      // 路径，所以"选了什么"当场就反映到颜色上，且每帧零开销。
-      const liveTint = new THREE.Color();
+      // 基色只在这里重置；耐力明度由 updateMesh 每帧按实时能量叠加。
       for (let index = 0; index < this.count; index += 1) {
-        const school = config.schools[this.schoolIds[index]];
         this.mesh.setColorAt(
           index,
-          metabolismTint(
-            new THREE.Color(school.color),
-            school.metabolismMultiplier,
-            liveTint
-          )
+          new THREE.Color(config.schools[this.schoolIds[index]].color)
         );
       }
       this.mesh.instanceColor.needsUpdate = true;
@@ -2184,6 +2179,23 @@ export class ExperimentSimulation {
         const school = this.config.schools[this.schoolIds[index]];
         // 视觉放大：判定用 school.size，画面用 visualSizeOf(size)
         scale.setScalar(visualSizeOf(school.size, school.id));
+        // 耐力明度：亮度 ∝ 还能活多久 = 当前能量 ÷ 每秒代谢。
+        // TUNING 时能量恒满 → 显示"这套选择能撑多久"；RUNNING 时能量
+        // 下降 → 显示"现在还能撑多久"。冲刺不计入，否则亮度会闪。
+        if (this.mesh.instanceColor && STAMINA_TINT_STRENGTH !== 0) {
+          const drain = metabolicRate(this.config, school, false);
+          const seconds =
+            drain > EPSILON ? this.energy[index] / drain : Infinity;
+          const factor = staminaTintFactor(seconds);
+          if (Math.abs(factor - this.tintFactors[index]) > 0.004) {
+            this.tintFactors[index] = factor;
+            corpseTint
+              .copy(this.schoolColors[this.schoolIds[index]])
+              .multiplyScalar(factor);
+            this.mesh.setColorAt(index, corpseTint);
+            this._instanceColorDirty = true;
+          }
+        }
         direction
           .set(
             this.velocities[offset],

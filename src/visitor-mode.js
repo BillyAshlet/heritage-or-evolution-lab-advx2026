@@ -30,8 +30,11 @@ export const VISITOR_OWNED_SCREENS = Object.freeze([
 // '/output/video/x.m4v' stays absolute and 404s wherever the site is not
 // served from the domain root (project pages, /downstream/ subpaths...),
 // which looks exactly like "the video never loads" on the deployed build.
+// import.meta.env only exists under Vite; in plain Node (npm test) it is
+// undefined, so fall back to '/' rather than throwing at import time.
+const ASSET_BASE = import.meta.env?.BASE_URL ?? '/';
 const asset = (path) =>
-  `${import.meta.env.BASE_URL}${path}`.replace(/([^:])\/{2,}/g, '$1/');
+  `${ASSET_BASE}${path}`.replace(/([^:])\/{2,}/g, '$1/');
 
 // A6 reading brochure, published to public/output/pdf/. Downloaded via
 // the title menu; goes through asset() so it resolves on any deploy base.
