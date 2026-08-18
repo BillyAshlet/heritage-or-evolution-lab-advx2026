@@ -90,6 +90,31 @@ const VISUAL_SIZE_BOOST = Object.freeze({
 // 是【这套选择能撑多久】；RUNNING 时能量下降，亮度就成了【现在还能
 // 撑多久】。一个通道，两层含义，且都是玩家真正关心的那个数。
 // 强度设 0 即关闭染色。
+// 饥饿的身体语言：能量低时游速下降、队形涣散。evolution-model.js 里
+// 早就写好了 energyResponse()，但它只被未接入主链路的 boids.js 调用 ——
+// 也就是说现在的鱼从满能量到饿死行为完全不变，然后突然暴毙，饥饿只有
+// 结果没有过程。强度 0 = 关闭（保持原行为）；1 = 完全启用。
+//
+// 【2026-08-19 评估结论：保持 0，暂不启用】
+// 已完整接线并用 npm run test:balance 实测三档强度（基线为三关全 PASS、
+// 中性与错误路线通过率均为 0%）：
+//   1.00 → L1 中性选择通过率 0% → 100%（关卡完全失去鉴别力）
+//   0.50 → L1 中性 80%
+//   0.25 → L1 中性 40%，且"极端缩体与耐力"这条错误路线也能过 20%
+// 失败方向与直觉相反：饥饿反应对【所有】鱼生效，包括捕食者。饿了的
+// 捕食者追不上猎物，玩家白捡存活率，关卡整体反而变简单。0.25 档同时
+// 放行中性和错误路线，说明这不是难度平移，而是往混沌系统里注入扰动、
+// 把各种子结果重新洗牌 —— 不存在"轻一点就安全"的强度区间。
+// 若将来要启用：必须连带重新标定三关胜利阈值（35%/75%/50%），并先决定
+// 是否只对玩家鱼群生效（捕食者维持满速）。
+// ⚠️ 这条改的是行为不是外观，改动后必须跑 npm run test:balance 复核。
+const HUNGER_RESPONSE_STRENGTH = 0;
+const HUNGER_TIRED_AT = 0.55; // 能量比低于此值开始变虚弱
+const HUNGER_EXHAUSTED_AT = 0.15; // 低于此值达到最虚弱
+const HUNGER_MIN_SPEED = 0.38;
+const HUNGER_MIN_ALIGNMENT = 0.35;
+const HUNGER_MIN_COHESION = 0.3;
+
 const STAMINA_TINT_STRENGTH = 0.45;
 const STAMINA_TINT_REFERENCE_SECONDS = 45; // 均衡选择的续航，作为亮度基准
 const STAMINA_TINT_MIN = 0.35; // 濒死时最暗
@@ -100,6 +125,22 @@ function visualSizeOf(size, schoolId) {
   if (VISUAL_SIZE_EXPONENT === 1) return size * boost;
   const ratio = Math.max(EPSILON, size / VISUAL_SIZE_ANCHOR);
   return VISUAL_SIZE_ANCHOR * ratio ** VISUAL_SIZE_EXPONENT * boost;
+}
+
+// 能量比 → {速度, 对齐, 凝聚} 的衰减倍率。满能量时全为 1。
+function hungerResponse(ratio) {
+  if (HUNGER_RESPONSE_STRENGTH === 0) return null;
+  const q = clamp(ratio, 0, 1);
+  if (q >= HUNGER_TIRED_AT) return null;
+  const span = HUNGER_TIRED_AT - HUNGER_EXHAUSTED_AT;
+  const t = span > EPSILON ? clamp((q - HUNGER_EXHAUSTED_AT) / span, 0, 1) : 0;
+  const awake = t * t * (3 - 2 * t); // smoothstep
+  const fade = HUNGER_RESPONSE_STRENGTH * (1 - awake);
+  return {
+    speed: 1 - fade * (1 - HUNGER_MIN_SPEED),
+    alignment: 1 - fade * (1 - HUNGER_MIN_ALIGNMENT),
+    cohesion: 1 - fade * (1 - HUNGER_MIN_COHESION),
+  };
 }
 
 // 还能活多久 → 亮度倍率。撑得久 = 亮，快饿死 = 暗。
@@ -1361,11 +1402,14 @@ export class ExperimentSimulation {
       Math.max(school.size, EPSILON),
       -this.config.perception.socialSizeExponent
     );
+    // 饿了就散：对齐与凝聚随能量下降而衰减
+    const hunger = hungerResponse(this._energyRatio(index));
     const cohesionWeight =
       school.cohesionWeight *
       Math.max(0, 1 - panic * relations.cohesionDrop) *
       socialScale *
-      sizeSocial;
+      sizeSocial *
+      (hunger ? hunger.cohesion : 1);
     // 接收方增益：自己越慌，越会去听邻居 —— 波才能一层层推下去
     const receiverBoost = interactionsEnabled
       ? Math.min(
@@ -1374,7 +1418,11 @@ export class ExperimentSimulation {
         )
       : 1;
     const alignmentWeight =
-      school.alignmentWeight * receiverBoost * socialScale * sizeSocial;
+      school.alignmentWeight *
+      receiverBoost *
+      socialScale *
+      sizeSocial *
+      (hunger ? hunger.alignment : 1);
 
     const vx = this.velocities[offset];
     const vy = this.velocities[offset + 1];
@@ -1675,6 +1723,8 @@ export class ExperimentSimulation {
     const state = this._movementState(index, target, threatened);
     const maxSpeed = effectiveMaxSpeed(this.config, school, state);
     desiredSpeed = Math.min(maxSpeed, desiredSpeed);
+    const hungerSpeed = hungerResponse(this._energyRatio(index));
+    if (hungerSpeed) desiredSpeed *= hungerSpeed.speed;
     nextVx = turned[0] * desiredSpeed;
     nextVy = turned[1] * desiredSpeed;
     nextVz = turned[2] * desiredSpeed;
