@@ -28,6 +28,12 @@ import {
   createGameLevelConfig,
 } from './game-mode.js';
 import { GameUI } from './game-ui.js';
+import {
+  T1_SPEC,
+  TUTORIAL_PROJECT,
+  createTutorialConfig,
+} from './tutorial-mode.js';
+import { TutorialUI } from './tutorial-ui.js';
 import { mountVisitorMode } from './visitor-mode.js';
 
 const startup = document.getElementById('startup-status');
@@ -199,6 +205,10 @@ async function bootstrap() {
   let visitorUI = null;
   let gameUiRevealed = false;
   let timeShortcuts = null;
+  let tutorialUI = null;
+  let tutorialSpec = T1_SPEC;
+  let tutorialValue = T1_SPEC.slider.initial;
+  let tutorialResetAt = 0;
   let lastPresentedProject = null;
   let lastGameUiUpdate = -Infinity;
 
@@ -221,17 +231,42 @@ async function bootstrap() {
     return config;
   }
 
+  function makeTutorialConfig() {
+    return createTutorialConfig(tutorialSpec, tutorialValue);
+  }
+
+  // 换体型 = 重建场景。教学关没有「保留现场」的需求，反而是回到初始
+  // 队形更利于对比两次选择的结果。
+  function installTutorialScene() {
+    controller.setStage(makeTutorialConfig());
+    controller.applyConfig('rebuildScene', 'tutorial.value');
+    // 和 onStart 里游戏开局是同一步：rebuildScene 之后的仿真处于「预览」
+    // 态，只跑运动不跑捕食。不调这一行的现象是关系矩阵显示「你的鱼 追
+    // 灰鱼」但 30 秒一条鱼都不死 —— 教学关会当着玩家的面说谎。
+    simulation.beginGameplayFromPreview();
+    world.resetTiming(performance.now());
+    tutorialResetAt = performance.now();
+  }
+
+  // game 与 tutorial 都会把 stage 整个换成自己生成的配置（鱼群数量、缸体
+  // 尺寸、捕食参数全不一样），所以离开它们时必须还原成进入前的那份，
+  // 否则会把教学关的 4 条鱼带进水族馆。
+  const MANAGED_PROJECTS = new Set(['game', TUTORIAL_PROJECT]);
+
   function prepareProjectStage(project) {
-    if (project === 'game') {
-      const enteringGame = current.runtime.project !== 'game';
-      if (enteringGame) {
+    const leavingManaged = MANAGED_PROJECTS.has(current.runtime.project);
+    if (MANAGED_PROJECTS.has(project)) {
+      if (!leavingManaged) {
         nonGameConfig = deepClone(current);
       }
-      stage = makeGameConfig({ newAttempt: enteringGame });
+      stage =
+        project === TUTORIAL_PROJECT
+          ? makeTutorialConfig()
+          : makeGameConfig({ newAttempt: current.runtime.project !== 'game' });
       return;
     }
 
-    if (current.runtime.project === 'game') {
+    if (leavingManaged) {
       stage = deepClone(nonGameConfig);
       stage.runtime.project = project;
     }
@@ -344,6 +379,32 @@ async function bootstrap() {
     simulation.setLocomotionPreview(
       isGame && gameSession.phase === GAME_PHASE.TUNING
     );
+    const isTutorial = project === TUTORIAL_PROJECT;
+    if (isTutorial && !tutorialUI) {
+      // 首次进入教学关同样要退出预览态（换滑块走 installTutorialScene，
+      // 但进关这一次不经过它）。
+      simulation.beginGameplayFromPreview();
+      tutorialUI = new TutorialUI({
+        spec: tutorialSpec,
+        onValueChange(value) {
+          tutorialValue = value;
+          installTutorialScene();
+        },
+        onReset: installTutorialScene,
+        onNext() {
+          // T2/T3 尚未实现。做完之前，「继续」先退回游戏本体，
+          // 不假装有下一课。
+          window.alert('第二课（速度）还没做，先回到正式关卡。');
+          controller.setProject('game');
+        },
+        onExit() {
+          controller.setProject('game');
+        },
+      });
+    } else if (!isTutorial && tutorialUI) {
+      tutorialUI.dispose();
+      tutorialUI = null;
+    }
     if (project !== lastPresentedProject && isGame) {
       cameraController.exitView(true);
     }
@@ -737,6 +798,18 @@ async function bootstrap() {
       const metrics = simulation.metrics();
       finishGameLevelIfNeeded(metrics);
       renderGameUi(nowMs);
+    } else if (current.runtime.project === TUTORIAL_PROJECT && tutorialUI) {
+      // 「不用失败重试，鱼被吃光了会自动回到最初位置」——教学关没有失败
+      // 画面，也没有确认按钮，看完结果自己就重来了。冷却 1.2s 是为了让
+      // 玩家看清最后一口，不然重建会打断正在发生的追击。
+      const alive = simulation
+        .metrics()
+        .population.filter((school) => school.target > 0);
+      const wiped = alive.some((school) => school.alive === 0);
+      if (wiped && nowMs - tutorialResetAt > 1200) {
+        tutorialUI.flashReset();
+        installTutorialScene();
+      }
     }
     cameraController.update(realDt);
     renderer.render(scene, camera);

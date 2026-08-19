@@ -61,7 +61,15 @@ test('default project is the live size-derived aquarium', () => {
   assert.ok(config.plankton.minFraction > 0);
   assert.ok(Math.abs(config.ecology.energyCapacity - 2 / 3) < 1e-12);
   assert.equal(config.ecology.minBurstEnergyRatio, 1 / 3);
-  assert.deepEqual(projectOptions, ['game', 'aquarium', 'obstacle', 'ecology']);
+  // 'tutorial' 是新手指引关（见 src/tutorial-mode.js）。它刻意不进
+  // LEVEL_SPECS，所以不参与继承链和平衡门禁，但确实是一个可切换的项目。
+  assert.deepEqual(projectOptions, [
+    'game',
+    'aquarium',
+    'obstacle',
+    'ecology',
+    'tutorial',
+  ]);
   assert.deepEqual(modeOptions, ['steady', 'ecology']);
   assert.equal('policy' in config.relations, false);
   assert.equal('holding' in config, false);

@@ -447,6 +447,7 @@ const scalarEntries = [
       '主项目 · 水族馆': 'aquarium',
       '子实验 · 地图与刚体': 'obstacle',
       '子实验 · 生态淘汰': 'ecology',
+      '教学 · 新手指引': 'tutorial',
     },
   }),
   entry('runtime.mode', 'Advanced · Runtime', 'mode', 'reset', {
