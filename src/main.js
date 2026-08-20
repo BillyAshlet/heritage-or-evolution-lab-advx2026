@@ -30,8 +30,10 @@ import {
 import { GameUI } from './game-ui.js';
 import {
   T1_SPEC,
+  TUTORIAL_SPECS,
   TUTORIAL_PROJECT,
   createTutorialConfig,
+  findTutorialSpec,
 } from './tutorial-mode.js';
 import { TutorialUI } from './tutorial-ui.js';
 import { mountVisitorMode } from './visitor-mode.js';
@@ -253,6 +255,72 @@ async function bootstrap() {
   // 否则会把教学关的 4 条鱼带进水族馆。
   const MANAGED_PROJECTS = new Set(['game', TUTORIAL_PROJECT]);
 
+  // ── 教学关的测试入口 ───────────────────────────────────────────────
+  // #tutorial 直接进第一课，#tutorial/T2 进指定一课。
+  //
+  // 这【只是测试入口】，不是产品入口。玩家最终怎么进教学（大概率是
+  // BEGIN 之后判断要不要教程、且可跳过）是等三课齐了再定的事，那个决定
+  // 不该被这段代码抢先。
+  //
+  // 为什么用 hash 而不是 /tutorial 这样的真实路径：本项目 vite 配置是
+  // base:'./'（相对路径，为的是能部署到任意子路径），而相对资源是按当前
+  // URL 路径解析的 —— 真跑在 /downstream/tutorial 下，./assets/* 会被解析
+  // 成 /downstream/tutorial/assets/* 全部 404，还得另加 vercel.json 写
+  // rewrite。hash 不参与路径解析，零配置，dev 和线上行为一致。
+  function tutorialLessonFromHash() {
+    const raw = window.location.hash.replace(/^#\/?/, '');
+    if (!raw) return null;
+    const [route, lesson] = raw.split('/');
+    if (route !== TUTORIAL_PROJECT) return null;
+    return lesson || TUTORIAL_SPECS[0].id;
+  }
+
+  function applyTutorialHashRoute() {
+    const lesson = tutorialLessonFromHash();
+    if (!lesson) return false;
+    let spec;
+    try {
+      spec = findTutorialSpec(lesson);
+    } catch {
+      spec = T1_SPEC;
+      console.warn(`未知的教学关 ${lesson}，已回落到 ${spec.id}。`);
+    }
+    if (spec !== tutorialSpec) {
+      tutorialSpec = spec;
+      tutorialValue = spec.slider.initial;
+      // 面板是按 spec 一次性建出来的，换课必须重建，否则文案会停在上一课。
+      tutorialUI?.dispose();
+      tutorialUI = null;
+    }
+    visitorUI?.hide();
+    if (current.runtime.project === TUTORIAL_PROJECT) {
+      syncProjectPresentation(true);
+    } else {
+      switchProject(TUTORIAL_PROJECT);
+    }
+    return true;
+  }
+
+  // controller 上没有 setProject（那是 experimentApi 的方法），换项目要走
+  // enterDeveloperMode 用的这条路：改 stage 的 project 再 rebuildScene。
+  function switchProject(project) {
+    stage.runtime.project = project;
+    controller.applyConfig('rebuildScene', 'runtime.project');
+    debug?.rebuildPane();
+  }
+
+  // 退出教学时清掉 hash，否则刷新会被弹回教学关。
+  function leaveTutorial(project) {
+    if (tutorialLessonFromHash()) {
+      history.replaceState(
+        null,
+        '',
+        window.location.pathname + window.location.search
+      );
+    }
+    switchProject(project);
+  }
+
   function prepareProjectStage(project) {
     const leavingManaged = MANAGED_PROJECTS.has(current.runtime.project);
     if (MANAGED_PROJECTS.has(project)) {
@@ -395,10 +463,10 @@ async function bootstrap() {
           // T2/T3 尚未实现。做完之前，「继续」先退回游戏本体，
           // 不假装有下一课。
           window.alert('第二课（速度）还没做，先回到正式关卡。');
-          controller.setProject('game');
+          leaveTutorial('game');
         },
         onExit() {
-          controller.setProject('game');
+          leaveTutorial('game');
         },
       });
     } else if (!isTutorial && tutorialUI) {
@@ -706,6 +774,13 @@ async function bootstrap() {
     },
   });
   syncProjectPresentation(true);
+
+  // 启动时读一次 hash；再监听 hashchange，这样在地址栏直接改
+  // #tutorial → #tutorial/T2 不用重载页面就能切课，测起来快得多。
+  applyTutorialHashRoute();
+  window.addEventListener('hashchange', () => {
+    applyTutorialHashRoute();
+  });
 
   const experimentApi = {
     stageConfig(next) {
