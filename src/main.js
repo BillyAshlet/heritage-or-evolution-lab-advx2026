@@ -242,9 +242,12 @@ async function bootstrap() {
   function installTutorialScene() {
     controller.setStage(makeTutorialConfig());
     controller.applyConfig('rebuildScene', 'tutorial.value');
-    // 和 onStart 里游戏开局是同一步：rebuildScene 之后的仿真处于「预览」
-    // 态，只跑运动不跑捕食。不调这一行的现象是关系矩阵显示「你的鱼 追
-    // 灰鱼」但 30 秒一条鱼都不死 —— 教学关会当着玩家的面说谎。
+    // 防御性地退出「运动预览」态并重置计时：预览态只跑运动不跑捕食，
+    // 而从游戏 TUNING 阶段切进教学关时仿真可能正处于该状态。
+    // （syncProjectPresentation 也会关掉它，这里是双保险。）
+    // ⚠️ 更正：这两行【不是】用来修「浏览器里鱼不会被吃」的 —— 那个现象
+    // 后来查明是自动化环境里标签页 visibilityState=hidden、rAF 被浏览器
+    // 挂起导致整个渲染循环没在跑，与本项目代码无关。
     simulation.beginGameplayFromPreview();
     world.resetTiming(performance.now());
     tutorialResetAt = performance.now();

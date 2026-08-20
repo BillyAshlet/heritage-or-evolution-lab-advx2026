@@ -2455,6 +2455,11 @@ export class ExperimentSimulation {
     return {
       seed: this.seed,
       elapsed: this.elapsed,
+      // 仿真当前走哪个分支。true = _advanceLocomotionPreview（只跑运动，
+      // 捕食/生态/计时全部不执行）。排查「鱼在游但什么都不发生」时，
+      // 这是第一个该看的值 —— 缺了它我曾经把 elapsed 恒为 0 误判成
+      // 「elapsed 不是仿真时间」，绕了很远。
+      locomotionPreview: this.locomotionPreview,
       project: this.config.runtime.project,
       mode: this.config.runtime.mode,
       population: this.config.schools.map((school, index) => ({
