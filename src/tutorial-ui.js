@@ -82,15 +82,6 @@ const CSS = `
 #tutorial-ui button.tutorial-primary {
   background: rgba(90, 166, 224, 0.22); border-color: rgba(90, 166, 224, 0.55);
 }
-#tutorial-ui .tutorial-reset-flash {
-  position: fixed; left: 50%; top: 18%; transform: translateX(-50%);
-  z-index: 41; padding: 10px 18px; pointer-events: none;
-  background: rgba(7, 20, 38, 0.9);
-  border: 1px solid rgba(180, 208, 232, 0.3);
-  color: #dce8f4; font: 400 13px/1.4 system-ui, sans-serif; letter-spacing: 0.1em;
-  opacity: 0; transition: opacity 260ms ease;
-}
-#tutorial-ui .tutorial-reset-flash[data-visible="1"] { opacity: 1; }
 `;
 
 function ensureStyle() {
@@ -141,16 +132,13 @@ export class TutorialUI {
         <button type="button" id="tutorial-next" class="tutorial-primary">我明白了 · 继续</button>
         <button type="button" id="tutorial-exit">跳过教学</button>
       </div>
-      <div class="tutorial-reset-flash" id="tutorial-flash">一方被吃光 · 已回到最初位置</div>
     `;
     const slider = root.querySelector('#tutorial-slider');
-    // input 事件每拖一格都触发一次重建场景，代价太大；这里只更新读数，
-    // 真正换体型交给 change（松手）。玩家仍然能边拖边看到数值与结果预测。
+    // 拖动过程中就生效，不等松手。体型是 live 应用的（不重建场景），
+    // 构建一次配置实测 0.035ms，每帧跑一次也毫无压力，没必要节流。
     slider.addEventListener('input', () => {
-      this.render(Number(slider.value));
-    });
-    slider.addEventListener('change', () => {
       this.value = Number(slider.value);
+      this.render(this.value);
       this.callbacks.onValueChange?.(this.value);
     });
     root
@@ -180,22 +168,11 @@ export class TutorialUI {
     this.root.querySelector('#tutorial-state').dataset.tone = copy.tone;
   }
 
-  /** 一方被吃光后的提示。不是失败画面 —— 教学关没有失败。 */
-  flashReset() {
-    const flash = this.root.querySelector('#tutorial-flash');
-    flash.dataset.visible = '1';
-    clearTimeout(this._flashTimer);
-    this._flashTimer = setTimeout(() => {
-      flash.dataset.visible = '';
-    }, 1500);
-  }
-
   setHidden(hidden) {
     this.root.hidden = Boolean(hidden);
   }
 
   dispose() {
-    clearTimeout(this._flashTimer);
     this.root.remove();
   }
 }

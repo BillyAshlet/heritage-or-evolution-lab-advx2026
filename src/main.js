@@ -210,7 +210,6 @@ async function bootstrap() {
   let tutorialUI = null;
   let tutorialSpec = T1_SPEC;
   let tutorialValue = T1_SPEC.slider.initial;
-  let tutorialResetAt = 0;
   let lastPresentedProject = null;
   let lastGameUiUpdate = -Infinity;
 
@@ -237,11 +236,22 @@ async function bootstrap() {
     return createTutorialConfig(tutorialSpec, tutorialValue);
   }
 
-  // 换体型 = 重建场景。教学关没有「保留现场」的需求，反而是回到初始
-  // 队形更利于对比两次选择的结果。
+  // 拖滑块 = 【实时】改体型，绝不重建场景。
+  //
+  // 之前这里走的是 rebuildScene，而 setConfig 在非 live 模式下会调 reset()，
+  // 鱼直接弹回出生点重新排队 —— 玩家每动一下滑块画面就"刷新"一次，根本
+  // 没法边调边看。live 模式重新推导体型、捕食半径、关系矩阵，但不 reset，
+  // 位置和速度原样保留：按住滑块来回拖，鱼一直在游，身体在手底下连续变。
+  // （游戏本体开局用的也是这条路，见 onStart。）
+  function applyTutorialSizeLive() {
+    controller.setStage(makeTutorialConfig());
+    controller.applyConfig('live', 'tutorial.value');
+  }
+
+  // 整场重来：只有进入教学关和玩家主动点「重新开始本场」时才走这条。
   function installTutorialScene() {
     controller.setStage(makeTutorialConfig());
-    controller.applyConfig('rebuildScene', 'tutorial.value');
+    controller.applyConfig('rebuildScene', 'tutorial.reset');
     // 防御性地退出「运动预览」态并重置计时：预览态只跑运动不跑捕食，
     // 而从游戏 TUNING 阶段切进教学关时仿真可能正处于该状态。
     // （syncProjectPresentation 也会关掉它，这里是双保险。）
@@ -250,7 +260,6 @@ async function bootstrap() {
     // 挂起导致整个渲染循环没在跑，与本项目代码无关。
     simulation.beginGameplayFromPreview();
     world.resetTiming(performance.now());
-    tutorialResetAt = performance.now();
   }
 
   // game 与 tutorial 都会把 stage 整个换成自己生成的配置（鱼群数量、缸体
@@ -461,7 +470,7 @@ async function bootstrap() {
         spec: tutorialSpec,
         onValueChange(value) {
           tutorialValue = value;
-          installTutorialScene();
+          applyTutorialSizeLive();
         },
         onReset: installTutorialScene,
         onNext() {
@@ -882,19 +891,12 @@ async function bootstrap() {
       const metrics = simulation.metrics();
       finishGameLevelIfNeeded(metrics);
       renderGameUi(nowMs);
-    } else if (current.runtime.project === TUTORIAL_PROJECT && tutorialUI) {
-      // 「不用失败重试，鱼被吃光了会自动回到最初位置」——教学关没有失败
-      // 画面，也没有确认按钮，看完结果自己就重来了。冷却 1.2s 是为了让
-      // 玩家看清最后一口，不然重建会打断正在发生的追击。
-      const alive = simulation
-        .metrics()
-        .population.filter((school) => school.target > 0);
-      const wiped = alive.some((school) => school.alive === 0);
-      if (wiped && nowMs - tutorialResetAt > 1200) {
-        tutorialUI.flashReset();
-        installTutorialScene();
-      }
     }
+    // 教学关不做任何自动重置。
+    // 一开始按「鱼被吃光自动回到最初位置」实现过，但实际用下来是错的：
+    // 试验刚出结果就被系统抢走重来，观察者根本没看够。安全试验的重跑
+    // 时机应该由观察者自己决定 —— 面板上的「重新开始本场」就是那个开关。
+    // 这里也顺带去掉了每帧一次的 metrics() 调用（它只为那个自动重置服务）。
     cameraController.update(realDt);
     renderer.render(scene, camera);
     cameraController.renderPreview();
