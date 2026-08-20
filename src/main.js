@@ -255,28 +255,32 @@ async function bootstrap() {
   // 否则会把教学关的 4 条鱼带进水族馆。
   const MANAGED_PROJECTS = new Set(['game', TUTORIAL_PROJECT]);
 
-  // ── 教学关的测试入口 ───────────────────────────────────────────────
-  // #tutorial 直接进第一课，#tutorial/T2 进指定一课。
+  // ── 教学关路由 /tutorial ──────────────────────────────────────────
+  // /tutorial 进第一课，/tutorial/T2 进指定一课。
   //
-  // 这【只是测试入口】，不是产品入口。玩家最终怎么进教学（大概率是
-  // BEGIN 之后判断要不要教程、且可跳过）是等三课齐了再定的事，那个决定
-  // 不该被这段代码抢先。
+  // 现阶段这是【测试入口】。玩家最终怎么进教学（大概率是 BEGIN 之后判断
+  // 要不要教程、且可跳过）等三课齐了再定，那个决定不该被这段代码抢先 ——
+  // 但路由本身不会白写，产品入口做好后它照样是可分享的直达链接。
   //
-  // 为什么用 hash 而不是 /tutorial 这样的真实路径：本项目 vite 配置是
-  // base:'./'（相对路径，为的是能部署到任意子路径），而相对资源是按当前
-  // URL 路径解析的 —— 真跑在 /downstream/tutorial 下，./assets/* 会被解析
-  // 成 /downstream/tutorial/assets/* 全部 404，还得另加 vercel.json 写
-  // rewrite。hash 不参与路径解析，零配置，dev 和线上行为一致。
-  function tutorialLessonFromHash() {
-    const raw = window.location.hash.replace(/^#\/?/, '');
-    if (!raw) return null;
-    const [route, lesson] = raw.split('/');
+  // 真实路径而非 hash：本项目独占 advx.billyashlet.com 的根，迁移也是整体
+  // 迁移，不存在"挂到未知子路径"的顾虑。代价是两处配套改动，都已做：
+  // vite base 改 '/'（否则相对资源在 /tutorial/ 下会 404），以及
+  // vercel.json 的 SPA rewrite（否则线上直接开 /tutorial 是 404）。
+  // 前缀从 BASE_URL 推导而不写死 '/'，这样 base 万一再变，路由跟着走。
+  const ROUTE_BASE = (import.meta.env?.BASE_URL ?? '/').replace(/\/*$/, '/');
+
+  function tutorialLessonFromPath() {
+    const path = window.location.pathname;
+    const rest = path.startsWith(ROUTE_BASE)
+      ? path.slice(ROUTE_BASE.length)
+      : path.replace(/^\//, '');
+    const [route, lesson] = rest.replace(/\/+$/, '').split('/');
     if (route !== TUTORIAL_PROJECT) return null;
     return lesson || TUTORIAL_SPECS[0].id;
   }
 
-  function applyTutorialHashRoute() {
-    const lesson = tutorialLessonFromHash();
+  function applyTutorialRoute() {
+    const lesson = tutorialLessonFromPath();
     if (!lesson) return false;
     let spec;
     try {
@@ -309,14 +313,12 @@ async function bootstrap() {
     debug?.rebuildPane();
   }
 
-  // 退出教学时清掉 hash，否则刷新会被弹回教学关。
+  // 退出教学时把地址退回根，否则刷新会被弹回教学关。用 pushState 而不是
+  // replaceState：玩家按浏览器后退键应该能回到教学关，这是真实路径路由
+  // 相对 hash 白拿的好处。
   function leaveTutorial(project) {
-    if (tutorialLessonFromHash()) {
-      history.replaceState(
-        null,
-        '',
-        window.location.pathname + window.location.search
-      );
+    if (tutorialLessonFromPath()) {
+      history.pushState(null, '', ROUTE_BASE + window.location.search);
     }
     switchProject(project);
   }
@@ -775,11 +777,15 @@ async function bootstrap() {
   });
   syncProjectPresentation(true);
 
-  // 启动时读一次 hash；再监听 hashchange，这样在地址栏直接改
-  // #tutorial → #tutorial/T2 不用重载页面就能切课，测起来快得多。
-  applyTutorialHashRoute();
-  window.addEventListener('hashchange', () => {
-    applyTutorialHashRoute();
+  // 启动时读一次路径；再监听 popstate，让浏览器前进/后退能在教学关与
+  // 正式关卡之间来回走。
+  applyTutorialRoute();
+  window.addEventListener('popstate', () => {
+    if (!applyTutorialRoute() && current.runtime.project === TUTORIAL_PROJECT) {
+      // 从 /tutorial 后退回根：离开教学关，但不要再 push 一条历史，
+      // 否则后退键会卡在两条记录之间来回跳。
+      switchProject('game');
+    }
   });
 
   const experimentApi = {
