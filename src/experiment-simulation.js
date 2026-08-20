@@ -679,7 +679,17 @@ export class ExperimentSimulation {
       config.schools,
       config.relations
     );
-    if (mode !== 'live') this.reset(config.runtime.seed);
+    if (mode !== 'live') {
+      this.reset(config.runtime.seed);
+    } else {
+      // live 改配置可能【翻转捕食关系】（教学关就是靠这个：拖一下滑块，
+      // 上一秒还被吃、下一秒变成吃）。捕食冷却是在出生时按当时的关系算的，
+      // 当时没有猎物的鱼群会被写成 Infinity —— 而 Infinity 减 dt 还是
+      // Infinity，永不过期。不重新播种的话，一条出生时是猎物的鱼此后
+      // 永远吃不到东西：实测它会追上、贴到 0.009m、1222 帧待在捕食半径内，
+      // 然后每一帧都被冷却挡掉。
+      this._resyncCaptureCooldowns();
+    }
     if (this.mesh) {
       this.mesh.material.opacity = config.visual.opacity;
       this.mesh.material.transparent = config.visual.opacity < 1;
@@ -701,6 +711,44 @@ export class ExperimentSimulation {
     this.locomotionPreview = next;
     if (!next) return;
     this._clearGameplayInteractionState();
+  }
+
+  /**
+   * 按当前捕食关系重新播种每条鱼的捕食冷却。
+   *
+   * 只在 live 改配置后调用 —— reset 路径会重新出生，本来就会算一遍。
+   * 复用出生时存下的 initialCooldownPhases，让同一条鱼的相位保持稳定，
+   * 拖滑块来回切不会因为反复随机而产生忽快忽慢的捕食节奏。
+   */
+  _resyncCaptureCooldowns() {
+    for (
+      let schoolIndex = 0;
+      schoolIndex < this.config.schools.length;
+      schoolIndex += 1
+    ) {
+      const school = this.config.schools[schoolIndex];
+      const pursuitSchool =
+        this.relationMatrix[schoolIndex].includes('pursuit');
+      const period = pursuitSchool
+        ? perPredatorCooldown(
+            this.derived.schools[schoolIndex].count,
+            effectiveSchoolCaptureRate(this.config, school),
+            captureSpeedFactor(this.config, school)
+          )
+        : Infinity;
+      for (let index = 0; index < this.count; index += 1) {
+        if (this.schoolIds[index] !== schoolIndex) continue;
+        if (!Number.isFinite(period)) {
+          this.cooldowns[index] = Infinity;
+        } else if (!Number.isFinite(this.cooldowns[index])) {
+          this.cooldowns[index] = this.initialCooldownPhases[index] * period;
+        } else {
+          // 关系没翻转但节奏变快时（比如体型变大提高了捕食率），
+          // 不该让旧的长冷却继续压着。
+          this.cooldowns[index] = Math.min(this.cooldowns[index], period);
+        }
+      }
+    }
   }
 
   _clearGameplayInteractionState() {

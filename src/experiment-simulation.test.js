@@ -8,6 +8,7 @@ import {
   perPredatorCooldown,
 } from './experiment-model.js';
 import { ExperimentSimulation } from './experiment-simulation.js';
+import { createTutorialConfig, T1_SPEC } from './tutorial-mode.js';
 
 function smallSimulation(mode = 'steady', seed = 1001, withScene = false) {
   const config = createDefaultConfig();
@@ -571,4 +572,40 @@ test('plankton seed stock cannot become frame-rate-dependent free food', () => {
   assert.ok(Math.abs(simulation.energy[eater] - 0.1) < 1e-7);
   assert.equal(simulation.planktonLevel, floor);
   assert.equal(simulation.planktonConsumed, consumedBefore);
+});
+
+test('捕食冷却在关系翻转后重新播种（否则出生时是猎物的鱼永远吃不到东西）', () => {
+  // 教学关会在运行中翻转捕食关系：拖一下滑块，上一秒被吃、下一秒变成吃。
+  // 冷却是出生时按当时关系算的，当时没有猎物的鱼群会被写成 Infinity，
+  // 而 Infinity - dt 还是 Infinity，永不过期。曾经的实际表现是：翻转后
+  // 追上了、贴到 0.009m、上千帧待在捕食半径内，却每一帧都被冷却挡掉。
+  const prey = createTutorialConfig(T1_SPEC, 0.7); // 玩家是猎物
+  prey.runtime.randomizeSeed = false;
+  prey.runtime.seed = 1001;
+  const simulation = new ExperimentSimulation({
+    scene: null,
+    config: prey,
+    distanceField: null,
+    physics: null,
+  });
+  const playerSchool = prey.schools.findIndex((school) => school.id === 'medium');
+  const playerFish = [];
+  for (let index = 0; index < simulation.count; index += 1) {
+    if (simulation.schoolIds[index] === playerSchool) playerFish.push(index);
+  }
+
+  assert.ok(
+    playerFish.every((index) => !Number.isFinite(simulation.cooldowns[index])),
+    '出生时玩家没有猎物，冷却应为 Infinity'
+  );
+
+  const predator = createTutorialConfig(T1_SPEC, 1.6); // 翻转成捕食者
+  predator.runtime.randomizeSeed = false;
+  predator.runtime.seed = 1001;
+  simulation.setConfig(predator, 'live');
+
+  assert.ok(
+    playerFish.every((index) => Number.isFinite(simulation.cooldowns[index])),
+    '翻转成捕食者后冷却必须变成有限值，否则永远无法捕食'
+  );
 });
