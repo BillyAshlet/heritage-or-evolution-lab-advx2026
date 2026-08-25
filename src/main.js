@@ -207,6 +207,17 @@ async function bootstrap() {
   let visitorUI = null;
   let gameUiRevealed = false;
   let timeShortcuts = null;
+  // 开发者模式是一个【状态】，不是"切到某个项目"这个动作。
+  //
+  // 改这一条之前，本应用其实没有开发者模式：调试面板在启动时无条件创建、
+  // 一直挂在 DOM 里，玩家看到的每一个界面都是靠 CSS 把它盖住做出来的
+  // （game-ui.css 和 visitor.css 里各有一份"隐藏清单"）。这种黑名单写法
+  // 的默认值是【泄漏】—— 新加一个玩家界面时只要忘了写隐藏规则，参数面板
+  // 就会露出来。教学关就是这么撞上的。
+  //
+  // 现在反过来：玩家视图是默认，开发者控件要显式打开才存在。新增玩家界面
+  // 不需要再写任何隐藏规则。
+  let developerMode = false;
   let tutorialUI = null;
   let tutorialSpec = T1_SPEC;
   let tutorialValue = T1_SPEC.slider.initial;
@@ -617,18 +628,24 @@ async function bootstrap() {
     },
   };
 
-  debug = createExperimentDebug({
-    controller,
-    simulation,
-    spawnRigidBody: (type, options) =>
-      physics.spawnRigidBody(type, options),
-  });
+  // 调试面板按需创建：不进开发者模式就完全不存在，而不是创建出来再藏起来。
+  function ensureDebug() {
+    if (!debug) {
+      debug = createExperimentDebug({
+        controller,
+        simulation,
+        spawnRigidBody: (type, options) =>
+          physics.spawnRigidBody(type, options),
+      });
+    }
+    return debug;
+  }
   const radiusVisualizer = new RadiusVisualizer(scene);
   timeShortcuts = new TimeShortcutController({
     setTimeScale(value) {
       stage.runtime.timeScale = value;
       controller.applyConfig('live', 'runtime.timeScale');
-      debug.pane?.refresh();
+      debug?.pane?.refresh();
       return current.runtime.timeScale;
     },
     onDoubleSpace() {
@@ -671,13 +688,41 @@ async function bootstrap() {
   // sits on 'aquarium' while the visitor shell is showing.
   const DEVELOPER_LANDING_PROJECT = 'obstacle';
 
+  function setDeveloperMode(enabled) {
+    developerMode = Boolean(enabled);
+    app.dataset.developer = developerMode ? '1' : '';
+  }
+
   function enterDeveloperMode() {
     gameUiRevealed = false;
+    setDeveloperMode(true);
+    ensureDebug();
     if (current.runtime.project !== DEVELOPER_LANDING_PROJECT) {
       stage.runtime.project = DEVELOPER_LANDING_PROJECT;
       controller.applyConfig('rebuildScene', 'runtime.project');
     }
-    debug.rebuildPane();
+    debug?.rebuildPane();
+    syncProjectPresentation(true);
+  }
+
+  // 退出开发者模式。改这条之前根本没有出口 —— 进去了只能刷新页面。
+  // 面板实例保留（下次进来不用重建），只是不再显示。
+  function exitDeveloperMode() {
+    setDeveloperMode(false);
+    if (tutorialLessonFromPath()) {
+      history.pushState(null, '', ROUTE_BASE + window.location.search);
+    }
+    // 回到标题页应有的背景。开发者模式多半停在 obstacle/ecology 这类
+    // 子实验上，直接把标题页盖上去会露出一缸不相干的东西。
+    if (
+      current.runtime.project !== 'game' &&
+      current.runtime.project !== 'aquarium'
+    ) {
+      stage.runtime.project = 'aquarium';
+      controller.applyConfig('rebuildScene', 'runtime.project');
+    }
+    returnToVisitorTitle();
+    visitorUI?.showTitle();
     syncProjectPresentation(true);
   }
 
@@ -700,7 +745,7 @@ async function bootstrap() {
     ) {
       stage.runtime.project = 'aquarium';
       controller.applyConfig('rebuildScene', 'runtime.project');
-      debug.rebuildPane();
+      debug?.rebuildPane();
     }
     syncProjectPresentation(true);
   }
@@ -760,7 +805,7 @@ async function bootstrap() {
       gameUiRevealed = false;
       stage.runtime.project = 'aquarium';
       controller.applyConfig('rebuildScene', 'runtime.project');
-      debug.rebuildPane();
+      debug?.rebuildPane();
       renderGameUi(performance.now(), true);
       visitorUI?.showTitle();
     },
@@ -791,6 +836,23 @@ async function bootstrap() {
 
   // 启动时读一次路径；再监听 popstate，让浏览器前进/后退能在教学关与
   // 正式关卡之间来回走。
+  // 左上角实验室标记 = 退出开发者模式的出口。用 h1 而不是 button 是因为
+  // 它本来就是标题；补上 role/tabindex 让键盘也能用。
+  const labMark = document.getElementById('lab-mark');
+  if (labMark) {
+    labMark.setAttribute('role', 'button');
+    labMark.setAttribute('tabindex', '0');
+    labMark.setAttribute('title', '退出开发者模式');
+    labMark.addEventListener('click', () => {
+      if (developerMode) exitDeveloperMode();
+    });
+    labMark.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      if (developerMode) exitDeveloperMode();
+    });
+  }
+
   applyTutorialRoute();
   window.addEventListener('popstate', () => {
     if (!applyTutorialRoute() && current.runtime.project === TUTORIAL_PROJECT) {
@@ -809,7 +871,7 @@ async function bootstrap() {
       if (nextOrMode && typeof nextOrMode === 'object') {
         controller.setStage(nextOrMode);
         const result = controller.applyConfig(maybeMode ?? 'rebuildScene');
-        debug.rebuildPane();
+        debug?.rebuildPane();
         return result;
       }
       return controller.applyConfig(nextOrMode ?? 'rebuildScene');
@@ -817,11 +879,12 @@ async function bootstrap() {
     exportConfig: () => controller.exportConfig(),
     importConfig(text) {
       const result = controller.importConfig(text);
-      debug.rebuildPane();
+      debug?.rebuildPane();
       return result;
     },
     reset: () => controller.reset(),
     metrics: () => simulation.metrics(),
+    exitDeveloperMode,
     spawnRigidBody: (type, options) =>
       physics.spawnRigidBody(type, options),
     setProject(project) {
@@ -830,7 +893,7 @@ async function bootstrap() {
         'rebuildScene',
         'runtime.project'
       );
-      debug.rebuildPane();
+      debug?.rebuildPane();
       return result;
     },
   };
@@ -902,7 +965,7 @@ async function bootstrap() {
     cameraController.renderPreview();
     timeShortcuts.update(current.runtime.timeScale);
     radiusVisualizer.update(simulation, current);
-    debug.update(nowMs);
+    debug?.update(nowMs);
   });
   setStartup('Web 实验版已就绪', 'ready');
   setTimeout(() => {

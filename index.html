@@ -537,6 +537,11 @@
         #lab-mark {
           display: none;
         }
+        /* 但开发者模式下必须保留 —— 它是唯一的出口，窄窗口下把它藏掉
+           等于又变成"进去了只能刷新"。 */
+        #app[data-developer="1"] #lab-mark {
+          display: block;
+        }
         #panel-holder {
           width: min(272px, calc(100% - 16px));
           top: 8px;
@@ -567,6 +572,29 @@
   <body>
     <style>
       /* 按 1 键收掉全部调试 UI —— 演示、截图、录屏用 */
+      /* 开发者控件默认【不存在】，只有显式进入开发者模式才出现。
+         这一条取代了原先散落在 game-ui.css / visitor.css 里的两份
+         "隐藏清单" —— 黑名单的默认值是泄漏：新加一个玩家界面时忘了写
+         隐藏规则，参数面板就露出来（教学关就是这么撞上的）。
+         反过来之后，新增玩家界面不需要写任何规则。 */
+      #app:not([data-developer="1"])
+        :is(#panel-holder, #lab-mark, #experiment-dashboard) {
+        display: none !important;
+      }
+
+      /* 左上角的实验室标记兼作退出开发者模式的出口 —— 点进去的地方
+         也是点出来的地方。改这条之前根本没有出口，只能刷新页面。 */
+      #app[data-developer="1"] #lab-mark {
+        cursor: pointer;
+      }
+      #app[data-developer="1"] #lab-mark:hover b {
+        text-decoration: underline;
+      }
+      #app[data-developer="1"] #lab-mark:focus-visible {
+        outline: 2px solid #C4892A;
+        outline-offset: 3px;
+      }
+
       #app[data-ui-hidden="1"] #panel-holder,
       #app[data-ui-hidden="1"] #lab-mark,
       #app[data-ui-hidden="1"] #startup-status,

@@ -34,14 +34,10 @@
   display: none !important;
 }
 
-#app[data-project="game"]
-  :is(
-    #panel-holder,
-    #lab-mark,
-    #startup-status,
-    #experiment-dashboard,
-    #enable-tilt
-  ) {
+/* #panel-holder / #lab-mark / #experiment-dashboard 已由 index.html 的
+   开发者门控统一处理（默认不存在），这里不再重复列举。剩下这两个不是
+   开发者控件，是 game 模式专有的取舍：启动状态条与陀螺仪按钮。 */
+#app[data-project="game"] :is(#startup-status, #enable-tilt) {
   display: none !important;
 }
 

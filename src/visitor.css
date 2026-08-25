@@ -276,7 +276,10 @@
   display: none !important;
 }
 
-/* Presentation shell owns only blocking menu/cutscene screens. */
+/* Presentation shell owns only blocking menu/cutscene screens.
+   这一条【不是】被 index.html 的开发者门控取代的冗余：它处理的是另一件事 ——
+   全屏遮罩弹出时不管开发者模式开着没有，底下的东西都不该透出来。
+   （#fish-inspector 与 #time-shortcut-hud 更是玩家控件，本来就不归门控管。） */
 #app[data-visitor-blocking="true"] #panel-holder,
 #app[data-visitor-blocking="true"] #lab-mark,
 #app[data-visitor-blocking="true"] #experiment-dashboard,
