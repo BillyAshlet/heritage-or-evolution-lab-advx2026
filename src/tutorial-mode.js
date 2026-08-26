@@ -119,6 +119,16 @@ export const T1_SPEC = deepFreeze({
   // burst 是唯一一个对两个方向【同步】生效、不破坏对称的旋钮。
   // 更高的值（1.75/2.0）会让鱼窜得失真，也容易出现擦身而过没吃到。
   locomotion: { burstFactor: 1.6 },
+  // 白底下的咬合反馈。默认那层白色辉光在 #eef1f0 上完全看不见 ——
+  // 而它正是「咬到了」这一瞬最主要的重音，等于这堂课最关键的事件少了
+  // 一半分量。换成深墨色读成一次【暗脉冲】，并把半径与时长略放大：
+  // 白底上没有辉光那种自然扩散感，得靠尺寸补回来。
+  captureVfx: {
+    biteGlowColor: '#16211f',
+    biteGlowRadius: 0.34,
+    biteGlowDuration: 0.55,
+    biteGlowStrength: 0.5,
+  },
   // 生态关掉：T1 只教捕食。开着的话鱼会饿死，玩家分不清「它死了」是
   // 因为被吃还是因为没饭吃。耐力留到 T3 再开。
   ecology: false,
@@ -228,6 +238,7 @@ export function createTutorialConfig(spec = T1_SPEC, value = spec.slider.initial
 
   Object.assign(result.capture, spec.capture);
   Object.assign(result.locomotion, spec.locomotion);
+  Object.assign(result.captureVfx, spec.captureVfx);
 
   return applyAxisOnly(result, spec.axis, value);
 }

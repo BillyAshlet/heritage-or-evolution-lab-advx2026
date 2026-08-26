@@ -138,6 +138,7 @@ export const CAPTURE_FX_PARAMS = {
   // Local brightening shell around the predator at the bite moment.
   // Falloff is linear * exp(-k r/R), stronger near the predator center.
   biteGlowEnabled: true,
+  biteGlowColor: '#ffffff',
   biteGlowRadius: 0.28,
   biteGlowDuration: 0.35,
   biteGlowStrength: 0.55,

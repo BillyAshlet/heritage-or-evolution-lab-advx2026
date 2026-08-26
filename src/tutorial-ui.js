@@ -252,6 +252,13 @@ const CSS = `
 #tutorial-ui[data-folded="1"] .t-head { justify-content: flex-end; }
 #tutorial-ui[data-folded="1"] .t-rule { height: 40px; }
 
+/* 当前所在的区间轻微加深 —— 不是装饰动画，是"你在这一段里"的状态反馈。
+   之前只有游标在动，区间条和标签是死的，玩家得自己把游标位置和区间对上。 */
+#tutorial-ui .t-bands span { transition: filter 140ms ease; }
+#tutorial-ui .t-bands span[data-active="1"] { filter: brightness(0.9) saturate(1.25); }
+#tutorial-ui .t-zone { transition: color 140ms ease, font-variation-settings 140ms ease; }
+#tutorial-ui .t-zone[data-active="1"] { font-variation-settings: 'wght' 420; }
+
 /* 中文收字距。downstream-design 里写着：拉丁小标签的 0.22em 放到中文上
    会散架，因为中文本来就是等宽方块、字间已经有天然间隙。同理 uppercase
    对中文无意义（中文没有大小写），层级只能靠字号和颜色补回来。 */
@@ -493,6 +500,14 @@ export class TutorialUI {
           String(button.dataset.lang === this.language)
         )
       );
+
+    const activeIndex = this.bands.findIndex((band) => band.relation === relation);
+    this.root.querySelectorAll('.t-bands span').forEach((node, index) => {
+      node.dataset.active = index === activeIndex ? '1' : '';
+    });
+    this.root.querySelectorAll('.t-zone').forEach((node, index) => {
+      node.dataset.active = index === activeIndex ? '1' : '';
+    });
 
     const percent = toPercent(spec, value);
     q('#t-cursor').style.left = `${percent}%`;

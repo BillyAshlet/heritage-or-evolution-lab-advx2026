@@ -280,6 +280,46 @@ async function bootstrap() {
 
   // 场景底色。默认值抄自 scene.js 的硬编码，教学关是实验室白，
   // 与 tutorial-ui.js 的 --t-bg 同色。
+  // 空气透视：远处的鱼向背景色褪去。
+  //
+  // 这修的是【可读性】，不是美观。鱼用的是 MeshBasicMaterial（不受光的
+  // 纯色块），在白底上没有任何深度线索 —— 于是一条远处的大鱼和一条近处
+  // 的小鱼看起来一样大。而这一课的全部内容就是比体型，深度线索缺失会让
+  // 玩家读错他正在学的那个量。
+  //
+  // ⚠️ MeshBasicMaterial 默认 fog: true，但着色器是在 scene.fog 还不存在
+  // 时编译的，事后加雾必须把材质标记为需要重编译，否则毫无效果。
+  function applyDepthCue(enabled) {
+    if (!scene) return;
+    const materials = [simulation?.mesh?.material].filter(Boolean);
+    if (!enabled) {
+      if (!scene.fog) return;
+      scene.fog = null;
+      materials.forEach((material) => (material.needsUpdate = true));
+      return;
+    }
+    // 雾的远近端跟着相机到缸心的距离走：缸只有 1.6 米深，写死的数值
+    // 换个取景就废了。
+    const distance = camera.position.length();
+    const depth = Math.max(0.6, current.tank.depth);
+    // 雾的跨度要【贴着缸深】，但不能贴太死。
+    // 这两个系数调了三轮：太宽（±1 倍缸深以上）鱼全落在雾的中段，明度差
+    // 看不出来，等于没做；太窄（0.55/0.62）后壁的鱼雾化到 90%、几乎消失，
+    // 而这一课是要比体型的，看不见的鱼没法比。
+    // 现在这组让最前面的鱼完全不褪色、最后面的褪约 70%，纵深读得出来，
+    // 每条鱼也都还看得见。
+    const near = Math.max(0.05, distance - depth * 0.6);
+    const far = distance + depth * 1.0;
+    if (scene.fog) {
+      scene.fog.color.set(TUTORIAL_SCENE_BG);
+      scene.fog.near = near;
+      scene.fog.far = far;
+      return;
+    }
+    scene.fog = new THREE.Fog(TUTORIAL_SCENE_BG, near, far);
+    materials.forEach((material) => (material.needsUpdate = true));
+  }
+
   const DEFAULT_SCENE_BG = '#f4efe6';
   const TUTORIAL_SCENE_BG = '#eef1f0';
 
@@ -483,6 +523,7 @@ async function bootstrap() {
     if (scene?.background?.set) {
       scene.background.set(isTutorial ? TUTORIAL_SCENE_BG : DEFAULT_SCENE_BG);
     }
+    applyDepthCue(isTutorial);
     // T1 不教变速：SPACE 慢放留给 T2、ENTER 快进留给 T3，每个操作都在
     // 它第一次真正有用的那一刻才出现。现在挂在顶上只是噪音。
     timeShortcuts?.setEnabled(!isTutorial && (timeShortcutsAllowed ?? true));

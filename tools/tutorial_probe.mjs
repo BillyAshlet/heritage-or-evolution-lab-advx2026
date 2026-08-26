@@ -18,6 +18,7 @@ import {
   T1_SPEC,
   tutorialRelation,
   RELATION_COPY,
+  t,
 } from '../src/tutorial-mode.js';
 
 const DT = 1 / 30;
@@ -50,7 +51,7 @@ function run(value, seed) {
 const SEEDS = [1001, 2003, 3001, 4001, 5003];
 console.log('滑块  预测      30s后 玩家/灰鱼(5种子)        首杀秒');
 for (const v of [0.55, 0.7, 1.0, 1.25, 1.6, 2.0]) {
-  const label = RELATION_COPY[tutorialRelation(T1_SPEC, v)].text;
+  const label = t(RELATION_COPY[tutorialRelation(T1_SPEC, v)], 'zh');
   const rows = SEEDS.map((s) => run(v, s));
   const pop = rows.map((r) => `${r.p}/${r.r}`).join(' ');
   const fk = rows.map((r) => (r.first === null ? '--' : r.first.toFixed(1))).join(' ');

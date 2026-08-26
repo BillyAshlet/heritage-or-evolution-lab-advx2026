@@ -95,6 +95,10 @@ export class CaptureVfx {
     this._color = new THREE.Color();
 
     this.glowGeometry = new THREE.SphereGeometry(1, 20, 14);
+    // 颜色可配：辉光是普通混合的半透明球，靠"比背景亮"来读。深水关卡
+    // 里白色是对的，但教学关是近白底（#eef1f0），白球等于隐形 ——
+    // 那一层恰恰是"咬到了"这一瞬最主要的重音。白底下要换成深色，
+    // 让它读成一次暗脉冲而不是一次亮脉冲。
     this.glowMaterial = new THREE.MeshBasicMaterial({
       color: '#ffffff',
       transparent: true,
@@ -264,6 +268,10 @@ export class CaptureVfx {
     const next = this.params.cubeColor || '#1e4f8c';
     if (this.material.color.getStyle() !== new THREE.Color(next).getStyle()) {
       this.material.color.set(next);
+    }
+    const glow = this.params.biteGlowColor || '#ffffff';
+    if (this.glowMaterial.color.getStyle() !== new THREE.Color(glow).getStyle()) {
+      this.glowMaterial.color.set(glow);
     }
   }
 

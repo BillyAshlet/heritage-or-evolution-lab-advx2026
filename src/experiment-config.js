@@ -293,6 +293,9 @@ export const DEFAULT_EXPERIMENT_CONFIG = Object.freeze({
     reverseVelocityFactor: 0.4,
     radialSpeed: 0.22,
     biteGlowEnabled: true,
+    // 辉光是普通混合的半透明球，靠「比背景亮」来读。深水关卡用白色，
+    // 但近白底（教学关）下白球等于隐形，那边会覆盖成深墨色读成暗脉冲。
+    biteGlowColor: '#ffffff',
     biteGlowRadius: 0.28,
     biteGlowDuration: 0.45,
     biteGlowStrength: 0.85,
@@ -1093,6 +1096,7 @@ const scalarEntries = [
     { min: 0.1, max: 2, step: 0.01 }
   ),
   entry('captureVfx.enabled', '捕获特效', '特效启用', 'live'),
+  entry('captureVfx.biteGlowColor', '捕获特效', '咬合脉冲颜色', 'live'),
   entry('captureVfx.particleCount', '捕获特效', '碎片数量上限', 'live', {
     min: 1,
     max: 24,
