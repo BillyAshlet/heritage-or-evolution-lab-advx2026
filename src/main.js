@@ -302,14 +302,11 @@ async function bootstrap() {
     // 换个取景就废了。
     const distance = camera.position.length();
     const depth = Math.max(0.6, current.tank.depth);
-    // 雾的跨度要【贴着缸深】，但不能贴太死。
-    // 这两个系数调了三轮：太宽（±1 倍缸深以上）鱼全落在雾的中段，明度差
-    // 看不出来，等于没做；太窄（0.55/0.62）后壁的鱼雾化到 90%、几乎消失，
-    // 而这一课是要比体型的，看不见的鱼没法比。
-    // 现在这组让最前面的鱼完全不褪色、最后面的褪约 70%，纵深读得出来，
-    // 每条鱼也都还看得见。
-    const near = Math.max(0.05, distance - depth * 0.6);
-    const far = distance + depth * 1.0;
+    // 雾区直接由【后壁最多褪多少】反推，不用两个魔数系数。
+    // 前壁 0 褪色，后壁褪 DEPTH_CUE_MAX_FADE —— 一个有含义的旋钮，
+    // 想更清就调小它，不用再猜两个乘数之间的关系。
+    const near = Math.max(0.05, distance - depth / 2);
+    const far = near + depth / DEPTH_CUE_MAX_FADE;
     if (scene.fog) {
       scene.fog.color.set(TUTORIAL_SCENE_BG);
       scene.fog.near = near;
@@ -319,6 +316,10 @@ async function bootstrap() {
     scene.fog = new THREE.Fog(TUTORIAL_SCENE_BG, near, far);
     materials.forEach((material) => (material.needsUpdate = true));
   }
+
+  // 后壁处最多褪去多少。0.7 试过 —— 纵深是出来了，但整缸发糊，
+  // 鱼的固有色被稀释，反而不容易比体型。0.3 保留纵深又让每条鱼都实。
+  const DEPTH_CUE_MAX_FADE = 0.3;
 
   const DEFAULT_SCENE_BG = '#f4efe6';
   const TUTORIAL_SCENE_BG = '#eef1f0';
