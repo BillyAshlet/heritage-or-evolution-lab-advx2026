@@ -377,9 +377,10 @@ function safeLanguage(language) {
 }
 
 function defaultLanguage() {
-  const browserLanguage =
-    typeof navigator === 'object' ? navigator.language : 'zh-CN';
-  return browserLanguage?.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  // 默认英文，可切换 —— 产品决定，不再看浏览器语言。
+  // 改这条之前是按 navigator.language 猜的（中文浏览器 → 中文），
+  // 结果是作者自己永远看不到英文版，也就永远不会发现英文那边的排版问题。
+  return 'en';
 }
 
 function normalizeLevelIndex(index, levelCount) {

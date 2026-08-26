@@ -278,6 +278,11 @@ async function bootstrap() {
   // 否则会把教学关的 4 条鱼带进水族馆。
   const MANAGED_PROJECTS = new Set(['game', TUTORIAL_PROJECT]);
 
+  // 场景底色。默认值抄自 scene.js 的硬编码，教学关是实验室白，
+  // 与 tutorial-ui.js 的 --t-bg 同色。
+  const DEFAULT_SCENE_BG = '#f4efe6';
+  const TUTORIAL_SCENE_BG = '#eef1f0';
+
   // ── 教学关路由 /tutorial ──────────────────────────────────────────
   // /tutorial 进第一课，/tutorial/T2 进指定一课。
   //
@@ -460,12 +465,11 @@ async function bootstrap() {
     // TUNING 也开放快慢键：调参恰恰是最需要放慢观察的时刻，原来只在
     // RUNNING 启用，等于"能看清的时候已经改不了了"。TUNING 期间倒计时
     // 与生态都不推进，变速只影响观察，不触及任何判定。
-    timeShortcuts?.setEnabled(
+    const timeShortcutsAllowed =
       !visitorBlocking &&
-        (!isGame ||
-          gameSession.phase === GAME_PHASE.RUNNING ||
-          gameSession.phase === GAME_PHASE.TUNING)
-    );
+      (!isGame ||
+        gameSession.phase === GAME_PHASE.RUNNING ||
+        gameSession.phase === GAME_PHASE.TUNING);
     // 点鱼观察窗链路在 game 模式同样开放（单击鱼 → 观察窗 → 特写/跟随
     // → ESC/双击空格回全局），只在游客壳遮挡时禁用。
     cameraController.setInteractionEnabled(!visitorBlocking);
@@ -473,12 +477,27 @@ async function bootstrap() {
       isGame && gameSession.phase === GAME_PHASE.TUNING
     );
     const isTutorial = project === TUTORIAL_PROJECT;
+    // 场景底色跟着项目走。scene.js 里写死的是暖米色 #f4efe6，那是水族馆
+    // 的调子；教学关要的是连成一片的实验室白 —— 缸外那一圈和控制条带
+    // 必须是同一个色，否则"标本被放在实验台上"这个读法就散了。
+    if (scene?.background?.set) {
+      scene.background.set(isTutorial ? TUTORIAL_SCENE_BG : DEFAULT_SCENE_BG);
+    }
+    // T1 不教变速：SPACE 慢放留给 T2、ENTER 快进留给 T3，每个操作都在
+    // 它第一次真正有用的那一刻才出现。现在挂在顶上只是噪音。
+    timeShortcuts?.setEnabled(!isTutorial && (timeShortcutsAllowed ?? true));
     if (isTutorial && !tutorialUI) {
       // 首次进入教学关同样要退出预览态（换滑块走 installTutorialScene，
       // 但进关这一次不经过它）。
       simulation.beginGameplayFromPreview();
       tutorialUI = new TutorialUI({
         spec: tutorialSpec,
+        // 跟随游客壳当前的语言：玩家在标题页选过中文，进教学关就该是中文。
+        language: visitorUI?.language ?? 'en',
+        onLanguageChange(next) {
+          // 反向同步，免得退出教学关后标题页又跳回英文。
+          window.downstream?.setLang?.(next);
+        },
         onValueChange(value) {
           tutorialValue = value;
           applyTutorialSizeLive();

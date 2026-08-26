@@ -595,6 +595,9 @@
         outline-offset: 3px;
       }
 
+      /* 教学关不显示变速 HUD：SPACE/ENTER 是 T2/T3 的教学内容。 */
+      #app[data-project="tutorial"] #time-shortcut-hud { display: none !important; }
+
       #app[data-ui-hidden="1"] #panel-holder,
       #app[data-ui-hidden="1"] #lab-mark,
       #app[data-ui-hidden="1"] #startup-status,

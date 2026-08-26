@@ -1,86 +1,273 @@
 /**
- * 教学关 UI。
+ * 教学关 UI —— 实验室白。
  *
- * 刻意做得比正式关卡的 UI 简陋：正式 UI 眼下的问题就是「信息太多、排版
- * 莫名其妙，很多人看了不知道要做什么」（设计者原话，UI 重做已排期）。
- * 教学关是玩家见到的第一屏，屏上每多一个数字都是一次分心，所以这里
- * 只留【一个滑块 + 三个数 + 一句状态】。
+ * 视觉方向由 .claude/skills/downstream-design 定义，这里是它的落地。
+ * 两条最要紧的：
  *
- * 三个数就是「体型数值显示」：你的体型、参照鱼体型、两者之比。之所以
- * 三个都给而不是只给比值 —— 玩家在正式关卡里看到的是绝对体型，只教比值
- * 会让他回到正式关卡时对不上号。
+ * 1. **光线本身就是叙事。** 正式关卡是深水（#071426 一路到 #111c28），
+ *    教学关是高调的实验室白。玩家从教学关跨进第一代时光线沉下去，
+ *    那一下不需要任何文字解释 —— 安全试验是可复原的，第一代不是。
+ *
+ * 2. **这是实验装置，不是参数面板。** 这一课没有指标、没有输赢，玩家
+ *    只负责看见。所以屏上常驻的只有一个控件、一条刻度、一句状态；
+ *    具体数值收进悬停里 —— 读数是查阅出来的，不是一直杵在那儿的。
+ *
+ * 排版刻意做成【上下分区】而不是浮层：装置的样子是标本区和控制区各占
+ * 各的地方。缸体比例改成 2.4 就是为了给底部条带腾出空水（见
+ * tutorial-mode.js 的 tank 注释），而不是让面板压在鱼身上。
+ * 另有两级让路：折叠收成细带（刻度与状态仍在，仍可调），H 键连它一起
+ * 全隐藏 —— 后者是给录屏用的。
  */
 
 import {
   RELATION_COPY,
+  t,
   tutorialRelation,
   tutorialSizeRatio,
 } from './tutorial-mode.js';
 
 const STYLE_ID = 'tutorial-ui-style';
 
+/* 实验室白。中性色带一点青绿偏色 —— 纯灰会显得没被选过。 */
 const CSS = `
 #tutorial-ui {
-  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
-  z-index: 40; width: min(560px, calc(100vw - 32px));
-  display: flex; flex-direction: column; gap: 14px;
-  padding: 18px 20px 16px;
-  background: rgba(7, 20, 38, 0.86);
-  border: 1px solid rgba(180, 208, 232, 0.22);
-  color: #dce8f4;
-  font: 400 13px/1.5 system-ui, -apple-system, "PingFang SC", sans-serif;
-  backdrop-filter: blur(10px);
+  --t-bg: #eef1f0;
+  --t-raise: #f7f9f8;
+  --t-ink: #16211f;
+  --t-dim: #6d7c7a;
+  --t-line: #c3cccb;
+  --t-tick: #aab5b4;
+  --t-eaten: #8b5f5c;
+  --t-eaten-band: #e0d3d1;
+  --t-peer-band: #e3e7e6;
+  --t-eat: #1f6d4e;
+  --t-eat-band: #cfdcd4;
+  --t-amber: #c4892a;
+
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  background: var(--t-bg);
+  border-top: 1px solid var(--t-line);
+  color: var(--t-ink);
+  font-family: 'Roboto Flex', system-ui, 'PingFang SC', sans-serif;
+  font-variation-settings: 'wght' 300;
 }
 #tutorial-ui[hidden] { display: none; }
-#tutorial-ui .tutorial-head {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+#app[data-ui-hidden="1"] #tutorial-ui { display: none !important; }
+
+#tutorial-ui .t-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 16px clamp(18px, 4vw, 40px) 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-#tutorial-ui .tutorial-label {
-  font-size: 12px; letter-spacing: 0.22em; color: #7fa8c9; text-transform: uppercase;
+
+#tutorial-ui .t-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
 }
-#tutorial-ui .tutorial-brief { color: #b8cde0; }
-#tutorial-ui .tutorial-hint {
-  color: #7fa8c9; font-size: 12px;
-  padding-left: 10px; border-left: 2px solid rgba(127, 168, 201, 0.4);
+#tutorial-ui .t-titles { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#tutorial-ui .t-eyebrow {
+  font-size: clamp(0.62rem, 1.1vw, 0.72rem);
+  font-variation-settings: 'wght' 200;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--t-dim);
 }
-#tutorial-ui .tutorial-slider-row {
-  display: flex; align-items: center; gap: 14px;
+#tutorial-ui .t-title {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  font-variation-settings: 'wght' 260;
+  letter-spacing: -0.035em;
+  line-height: 1;
 }
-#tutorial-ui .tutorial-slider-row label {
-  letter-spacing: 0.1em; color: #9fc0da; white-space: nowrap;
+#tutorial-ui .t-brief {
+  margin: 0;
+  max-width: 62ch;
+  font-size: clamp(0.82rem, 1.3vw, 0.94rem);
+  color: var(--t-dim);
+  line-height: 1.55;
 }
-#tutorial-ui input[type="range"] { flex: 1; accent-color: #5aa6e0; }
-#tutorial-ui .tutorial-readout {
-  display: flex; align-items: stretch; gap: 10px;
+#tutorial-ui .t-hint {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--t-line);
+  font-size: clamp(0.74rem, 1.1vw, 0.82rem);
+  color: var(--t-dim);
 }
-#tutorial-ui .tutorial-cell {
-  flex: 1; display: flex; flex-direction: column; gap: 3px;
-  padding: 8px 10px; background: rgba(255, 255, 255, 0.04);
-}
-#tutorial-ui .tutorial-cell span {
-  font-size: 11px; letter-spacing: 0.12em; color: #7fa8c9;
-}
-#tutorial-ui .tutorial-cell strong {
-  font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums;
-}
-#tutorial-ui .tutorial-state {
-  flex: 1.1; align-items: center; justify-content: center; text-align: center;
-}
-#tutorial-ui .tutorial-state[data-tone="eat"]   { background: rgba(90, 200, 140, 0.16); }
-#tutorial-ui .tutorial-state[data-tone="eaten"] { background: rgba(224, 96, 96, 0.16); }
-#tutorial-ui .tutorial-state[data-tone="peer"]  { background: rgba(255, 255, 255, 0.04); }
-#tutorial-ui .tutorial-state[data-tone="eat"]   strong { color: #7fe0a8; }
-#tutorial-ui .tutorial-state[data-tone="eaten"] strong { color: #ff9a9a; }
-#tutorial-ui .tutorial-actions { display: flex; gap: 10px; }
+#tutorial-ui .t-corner { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
 #tutorial-ui button {
-  flex: 1; padding: 9px 12px; cursor: pointer;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(180, 208, 232, 0.26);
-  color: #dce8f4; font: inherit; letter-spacing: 0.08em;
+  font-family: inherit;
+  color: var(--t-dim);
+  background: none;
+  border: 1px solid var(--t-line);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
 }
-#tutorial-ui button:hover { background: rgba(255, 255, 255, 0.12); }
-#tutorial-ui button.tutorial-primary {
-  background: rgba(90, 166, 224, 0.22); border-color: rgba(90, 166, 224, 0.55);
+#tutorial-ui button:hover { color: var(--t-ink); border-color: var(--t-ink); }
+#tutorial-ui button:focus-visible { outline: 2px solid var(--t-amber); outline-offset: 2px; }
+
+#tutorial-ui .t-lang { display: flex; }
+#tutorial-ui .t-lang button {
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  padding: 6px 10px;
+}
+#tutorial-ui .t-lang button + button { border-left: none; }
+#tutorial-ui .t-lang button[aria-pressed="true"] {
+  color: var(--t-raise);
+  background: var(--t-ink);
+  border-color: var(--t-ink);
+}
+#tutorial-ui .t-fold {
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
+#tutorial-ui .t-rule-row { display: flex; align-items: center; gap: clamp(12px, 2vw, 22px); }
+#tutorial-ui .t-rule-label {
+  font-size: clamp(0.62rem, 1.1vw, 0.72rem);
+  font-variation-settings: 'wght' 200;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--t-dim);
+  white-space: nowrap;
+}
+#tutorial-ui .t-rule { position: relative; flex: 1; height: 46px; touch-action: none; }
+#tutorial-ui .t-bands {
+  position: absolute; left: 0; right: 0; top: 15px; height: 10px;
+  display: flex; overflow: hidden;
+}
+#tutorial-ui .t-bands span { display: block; height: 100%; }
+#tutorial-ui .t-band-eaten { background: var(--t-eaten-band); }
+#tutorial-ui .t-band-peer  { background: var(--t-peer-band); }
+#tutorial-ui .t-band-eat   { background: var(--t-eat-band); }
+
+#tutorial-ui .t-ticks { position: absolute; left: 0; right: 0; top: 15px; height: 10px; }
+#tutorial-ui .t-ticks i { position: absolute; top: 0; width: 1px; height: 100%; background: var(--t-tick); }
+
+#tutorial-ui .t-zone {
+  position: absolute; top: 29px;
+  font-size: 0.64rem;
+  font-variation-settings: 'wght' 200;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+#tutorial-ui .t-zone[data-tone="eaten"] { color: var(--t-eaten); }
+#tutorial-ui .t-zone[data-tone="peer"]  { color: var(--t-dim); }
+#tutorial-ui .t-zone[data-tone="eat"]   { color: var(--t-eat); }
+
+#tutorial-ui .t-cursor {
+  position: absolute; top: 6px; width: 2px; height: 28px;
+  background: var(--t-ink); transform: translateX(-50%); pointer-events: none;
+}
+#tutorial-ui .t-cursor::before {
+  content: ""; position: absolute; left: 50%; top: -6px;
+  width: 10px; height: 10px; background: var(--t-ink);
+  transform: translateX(-50%) rotate(45deg);
+}
+/* 原生 range 铺满整条轨道负责输入；视觉全部由上面那几层承担。 */
+#tutorial-ui .t-rule input[type="range"] {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; opacity: 0; cursor: ew-resize;
+}
+
+#tutorial-ui .t-readout {
+  position: absolute; bottom: 52px; transform: translateX(-50%);
+  background: var(--t-raise); border: 1px solid var(--t-line);
+  padding: 10px 14px;
+  display: flex; gap: 18px; align-items: flex-end;
+  white-space: nowrap; pointer-events: none;
+  opacity: 0; transition: opacity 130ms ease;
+}
+#tutorial-ui .t-rule:hover .t-readout,
+#tutorial-ui .t-rule:focus-within .t-readout { opacity: 1; }
+#tutorial-ui .t-cell { display: flex; flex-direction: column; gap: 3px; }
+#tutorial-ui .t-cell b {
+  font-size: 0.6rem;
+  font-variation-settings: 'wght' 200;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--t-dim);
+}
+#tutorial-ui .t-cell u {
+  text-decoration: none;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#tutorial-ui .t-foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+#tutorial-ui .t-state { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#tutorial-ui .t-state b {
+  font-size: clamp(0.62rem, 1.1vw, 0.72rem);
+  font-variation-settings: 'wght' 200;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--t-dim);
+}
+#tutorial-ui .t-state strong {
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  font-variation-settings: 'wght' 300;
+  letter-spacing: 0.02em;
+}
+#tutorial-ui .t-state[data-tone="eaten"] strong { color: var(--t-eaten); }
+#tutorial-ui .t-state[data-tone="peer"]  strong { color: var(--t-dim); }
+#tutorial-ui .t-state[data-tone="eat"]   strong { color: var(--t-eat); }
+
+#tutorial-ui .t-acts { display: flex; gap: 10px; flex-shrink: 0; }
+#tutorial-ui .t-acts button {
+  font-size: clamp(0.72rem, 1.2vw, 0.82rem);
+  letter-spacing: 0.1em;
+  padding: 9px 16px;
+}
+/* 唯一的主行动号召：全场最重的字重、最宽的字距、一层琥珀辉光。
+   一屏只该有一个这样的东西（见 downstream-design）。 */
+#tutorial-ui .t-acts button.t-primary {
+  font-variation-settings: 'wght' 550;
+  letter-spacing: 0.34em;
+  padding-right: 12px;
+  color: var(--t-ink);
+  border-color: var(--t-ink);
+  text-shadow: 0 0 18px rgba(196, 137, 42, 0.4);
+}
+
+/* 折叠：收成细带，刻度与状态仍在，仍可调。 */
+#tutorial-ui[data-folded="1"] .t-titles,
+#tutorial-ui[data-folded="1"] .t-hint,
+#tutorial-ui[data-folded="1"] .t-acts { display: none; }
+#tutorial-ui[data-folded="1"] .t-inner { padding-top: 8px; padding-bottom: 10px; gap: 6px; }
+#tutorial-ui[data-folded="1"] .t-head { justify-content: flex-end; }
+#tutorial-ui[data-folded="1"] .t-rule { height: 40px; }
+
+/* 中文收字距。downstream-design 里写着：拉丁小标签的 0.22em 放到中文上
+   会散架，因为中文本来就是等宽方块、字间已经有天然间隙。同理 uppercase
+   对中文无意义（中文没有大小写），层级只能靠字号和颜色补回来。 */
+#tutorial-ui[data-lang="zh"] :is(.t-eyebrow, .t-rule-label, .t-zone, .t-cell b, .t-state b) {
+  letter-spacing: 0.08em;
+}
+#tutorial-ui[data-lang="zh"] .t-title { letter-spacing: 0; }
+#tutorial-ui[data-lang="zh"] .t-acts button { letter-spacing: 0.04em; }
+#tutorial-ui[data-lang="zh"] .t-acts button.t-primary {
+  letter-spacing: 0.18em;
+  padding-right: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tutorial-ui .t-readout,
+  #tutorial-ui button { transition: none; }
 }
 `;
 
@@ -92,80 +279,230 @@ function ensureStyle() {
   document.head.appendChild(style);
 }
 
+const UI_COPY = {
+  size: { en: 'Size', zh: '体型' },
+  you: { en: 'You', zh: '你的体型' },
+  grey: { en: 'Grey', zh: '灰鱼' },
+  ratio: { en: 'Ratio', zh: '体型比' },
+  result: { en: 'Result', zh: '结果' },
+  rerun: { en: 'Re-run', zh: '重新开始' },
+  understood: { en: 'I understand', zh: '我明白了' },
+  skip: { en: 'Skip', zh: '跳过教学' },
+  fold: { en: 'Fold', zh: '收起' },
+  unfold: { en: 'Unfold', zh: '展开' },
+};
+
+function toPercent(spec, value) {
+  const { min, max } = spec.slider;
+  return ((value - min) / (max - min)) * 100;
+}
+
 export class TutorialUI {
-  constructor({ spec, onValueChange, onReset, onNext, onExit } = {}) {
+  constructor({
+    spec,
+    language = 'en',
+    onValueChange,
+    onReset,
+    onNext,
+    onExit,
+    onLanguageChange,
+  } = {}) {
     ensureStyle();
     this.spec = spec;
-    this.callbacks = { onValueChange, onReset, onNext, onExit };
+    this.language = language === 'zh' ? 'zh' : 'en';
+    this.callbacks = { onValueChange, onReset, onNext, onExit, onLanguageChange };
     this.value = spec.slider.initial;
+    this.folded = false;
+    this.bands = this._bands();
     this.root = this._build();
     document.getElementById('app').appendChild(this.root);
     this.render(this.value);
   }
 
+  _text(key) {
+    return t(UI_COPY[key], this.language);
+  }
+
+  /**
+   * 三段区间的边界【由引擎的判定扫出来】，不写死百分比。
+   * 阈值以后要是改了（k、参照鱼体型），轨道上的分段会自己跟着变，
+   * 不会出现「画的和判的不一样」—— 那正是教学关最不能犯的错。
+   */
+  _bands() {
+    const { min, max, step } = this.spec.slider;
+    const marks = [];
+    let previous = null;
+    for (let v = min; v <= max + 1e-9; v += step) {
+      const value = Number(v.toFixed(4));
+      const relation = tutorialRelation(this.spec, value);
+      if (relation !== previous) {
+        marks.push({ relation, from: value });
+        previous = relation;
+      }
+    }
+    return marks.map((mark, index) => {
+      const left = toPercent(this.spec, mark.from);
+      const right =
+        index === marks.length - 1
+          ? 100
+          : toPercent(this.spec, marks[index + 1].from);
+      return { ...mark, left, width: right - left };
+    });
+  }
+
   _build() {
+    const spec = this.spec;
+    const { min, max, step, initial } = spec.slider;
     const root = document.createElement('section');
     root.id = 'tutorial-ui';
-    root.setAttribute('aria-label', '教学关操作面板');
-    const { min, max, step, initial } = this.spec.slider;
+    root.setAttribute('aria-label', t(spec.label, this.language));
+
+    const bandMarkup = this.bands
+      .map(
+        (band) =>
+          `<span class="t-band-${
+            RELATION_COPY[band.relation]?.tone ?? 'peer'
+          }" style="width:${band.width}%"></span>`
+      )
+      .join('');
+    const zoneMarkup = this.bands
+      .map(
+        (band) =>
+          `<span class="t-zone" data-tone="${
+            RELATION_COPY[band.relation]?.tone ?? 'peer'
+          }" style="left:${band.left + band.width / 2}%"></span>`
+      )
+      .join('');
+    const tickMarkup =
+      this.bands.map((band) => `<i style="left:${band.left}%"></i>`).join('') +
+      '<i style="left:100%"></i>';
+
     root.innerHTML = `
-      <div class="tutorial-head">
-        <span class="tutorial-label">${this.spec.label}</span>
-      </div>
-      <p class="tutorial-brief">${this.spec.brief}</p>
-      <p class="tutorial-hint">${this.spec.controlHint}</p>
-      <div class="tutorial-slider-row">
-        <label for="tutorial-slider">体型</label>
-        <input type="range" id="tutorial-slider"
-               min="${min}" max="${max}" step="${step}" value="${initial}" />
-      </div>
-      <div class="tutorial-readout">
-        <div class="tutorial-cell"><span>你的体型</span><strong id="tutorial-size">—</strong></div>
-        <div class="tutorial-cell"><span>灰鱼体型</span><strong id="tutorial-ref">—</strong></div>
-        <div class="tutorial-cell"><span>体型比</span><strong id="tutorial-ratio">—</strong></div>
-        <div class="tutorial-cell tutorial-state" id="tutorial-state">
-          <span>结果</span><strong id="tutorial-state-text">—</strong>
+      <div class="t-inner">
+        <div class="t-head">
+          <div class="t-titles">
+            <span class="t-eyebrow" id="t-eyebrow"></span>
+            <h2 class="t-title" id="t-title"></h2>
+            <p class="t-brief" id="t-brief"></p>
+          </div>
+          <div class="t-corner">
+            <div class="t-lang" role="group" aria-label="Language">
+              <button type="button" data-lang="en">EN</button>
+              <button type="button" data-lang="zh">中</button>
+            </div>
+            <button type="button" class="t-fold" id="t-fold"></button>
+          </div>
+        </div>
+        <p class="t-hint" id="t-hint"></p>
+        <div class="t-rule-row">
+          <span class="t-rule-label" id="t-rule-label"></span>
+          <div class="t-rule">
+            <div class="t-bands">${bandMarkup}</div>
+            <div class="t-ticks">${tickMarkup}</div>
+            ${zoneMarkup}
+            <div class="t-cursor" id="t-cursor"></div>
+            <div class="t-readout" id="t-readout">
+              <div class="t-cell"><b id="t-lbl-you"></b><u id="t-you">—</u></div>
+              <div class="t-cell"><b id="t-lbl-grey"></b><u id="t-grey">—</u></div>
+              <div class="t-cell"><b id="t-lbl-ratio"></b><u id="t-ratio">—</u></div>
+            </div>
+            <input type="range" id="t-slider"
+                   min="${min}" max="${max}" step="${step}" value="${initial}" />
+          </div>
+        </div>
+        <div class="t-foot">
+          <div class="t-state" id="t-state">
+            <b id="t-lbl-result"></b><strong id="t-result">—</strong>
+          </div>
+          <div class="t-acts">
+            <button type="button" id="t-reset"></button>
+            <button type="button" id="t-next" class="t-primary"></button>
+            <button type="button" id="t-exit"></button>
+          </div>
         </div>
       </div>
-      <div class="tutorial-actions">
-        <button type="button" id="tutorial-reset">重新开始本场</button>
-        <button type="button" id="tutorial-next" class="tutorial-primary">我明白了 · 继续</button>
-        <button type="button" id="tutorial-exit">跳过教学</button>
-      </div>
     `;
-    const slider = root.querySelector('#tutorial-slider');
-    // 拖动过程中就生效，不等松手。体型是 live 应用的（不重建场景），
-    // 构建一次配置实测 0.035ms，每帧跑一次也毫无压力，没必要节流。
+
+    // 拖动过程中就生效：体型是 live 应用的，构建一次配置实测 0.035ms。
+    const slider = root.querySelector('#t-slider');
     slider.addEventListener('input', () => {
       this.value = Number(slider.value);
       this.render(this.value);
       this.callbacks.onValueChange?.(this.value);
     });
-    root
-      .querySelector('#tutorial-reset')
-      .addEventListener('click', () => this.callbacks.onReset?.());
-    root
-      .querySelector('#tutorial-next')
-      .addEventListener('click', () => this.callbacks.onNext?.());
-    root
-      .querySelector('#tutorial-exit')
-      .addEventListener('click', () => this.callbacks.onExit?.());
+
+    root.querySelector('.t-lang').addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-lang]');
+      if (!button) return;
+      this.setLanguage(button.dataset.lang);
+      this.callbacks.onLanguageChange?.(this.language);
+    });
+    root.querySelector('#t-fold').addEventListener('click', () => this.toggleFold());
+    root.querySelector('#t-reset').addEventListener('click', () => this.callbacks.onReset?.());
+    root.querySelector('#t-next').addEventListener('click', () => this.callbacks.onNext?.());
+    root.querySelector('#t-exit').addEventListener('click', () => this.callbacks.onExit?.());
     return root;
+  }
+
+  setLanguage(language) {
+    this.language = language === 'zh' ? 'zh' : 'en';
+    this.render(this.value);
+  }
+
+  toggleFold(next = !this.folded) {
+    this.folded = Boolean(next);
+    this.root.dataset.folded = this.folded ? '1' : '';
+    this.render(this.value);
   }
 
   render(value = this.value) {
     const spec = this.spec;
+    const q = (id) => this.root.querySelector(id);
     const ratio = tutorialSizeRatio(spec, value);
     const relation = tutorialRelation(spec, value);
     const copy = RELATION_COPY[relation] ?? RELATION_COPY.peer;
-    this.root.querySelector('#tutorial-size').textContent = (
-      spec.referenceSize * ratio
-    ).toFixed(2);
-    this.root.querySelector('#tutorial-ref').textContent =
-      spec.referenceSize.toFixed(2);
-    this.root.querySelector('#tutorial-ratio').textContent = ratio.toFixed(2);
-    this.root.querySelector('#tutorial-state-text').textContent = copy.text;
-    this.root.querySelector('#tutorial-state').dataset.tone = copy.tone;
+
+    this.root.dataset.lang = this.language;
+    q('#t-eyebrow').textContent = t(spec.label, this.language);
+    q('#t-title').textContent = t(spec.axisName, this.language);
+    q('#t-brief').textContent = t(spec.brief, this.language);
+    q('#t-hint').textContent = t(spec.controlHint, this.language);
+    q('#t-rule-label').textContent = this._text('size');
+    q('#t-lbl-you').textContent = this._text('you');
+    q('#t-lbl-grey').textContent = this._text('grey');
+    q('#t-lbl-ratio').textContent = this._text('ratio');
+    q('#t-lbl-result').textContent = this._text('result');
+    q('#t-reset').textContent = this._text('rerun');
+    q('#t-next').textContent = this._text('understood');
+    q('#t-exit').textContent = this._text('skip');
+    q('#t-fold').textContent = this.folded ? this._text('unfold') : this._text('fold');
+
+    this.root.querySelectorAll('.t-zone').forEach((node, index) => {
+      const band = this.bands[index];
+      if (!band) return;
+      node.textContent = t(
+        RELATION_COPY[band.relation] ?? RELATION_COPY.peer,
+        this.language
+      );
+    });
+    this.root
+      .querySelectorAll('.t-lang button')
+      .forEach((button) =>
+        button.setAttribute(
+          'aria-pressed',
+          String(button.dataset.lang === this.language)
+        )
+      );
+
+    const percent = toPercent(spec, value);
+    q('#t-cursor').style.left = `${percent}%`;
+    // 读数卡贴着游标走，两端要收住，否则会被轨道边缘裁掉。
+    q('#t-readout').style.left = `${Math.min(88, Math.max(12, percent))}%`;
+    q('#t-you').textContent = (spec.referenceSize * ratio).toFixed(2);
+    q('#t-grey').textContent = spec.referenceSize.toFixed(2);
+    q('#t-ratio').textContent = ratio.toFixed(2);
+    q('#t-result').textContent = t(copy, this.language);
+    q('#t-state').dataset.tone = copy.tone;
   }
 
   setHidden(hidden) {

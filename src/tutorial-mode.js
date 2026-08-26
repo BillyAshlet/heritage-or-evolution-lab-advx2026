@@ -45,13 +45,29 @@ function deepFreeze(value) {
 export const T1_SPEC = deepFreeze({
   id: 'T1',
   axis: 'size',
-  label: '第一课 · 体型',
-  brief: '只有体型可以调。把它调大到能吃掉灰鱼，再调小到会被灰鱼吃掉。',
+  // 文案双语。默认英文（见 visitor-mode.js 的 defaultLanguage），
+  // 教学关自带切换 —— 进 /tutorial 时游客壳是关的，否则从链接直接
+  // 进来的玩家切不了语言。
+  label: { en: 'Lesson 01', zh: '第一课' },
+  axisName: { en: 'Size', zh: '体型' },
+  brief: {
+    en: 'Only size can change. Grow until you can eat the grey fish — then shrink until they eat you.',
+    zh: '只有体型可以调。把它调大到能吃掉灰鱼，再调小到会被灰鱼吃掉。',
+  },
   // 操作教学：这一课顺带教「点鱼」。SPACE 慢放放在 T2、ENTER 快进放在
   // T3 —— 每个操作都在它第一次真正有用的那一刻才出现。
-  controlHint: '点一条鱼 → 打开观察窗 → 「绕看视角」可以绕着它看一圈。',
+  controlHint: {
+    en: 'Click any fish to open the inspector — "Orbit" lets you circle it.',
+    zh: '点一条鱼 → 打开观察窗 →「绕看视角」可以绕着它看一圈。',
+  },
   // 迷你水缸：正式关卡是 6×3.6×2.4，太大了两条鱼可能几十秒碰不上面。
-  tank: { width: 3.2, height: 1.8, depth: 1.6 },
+  //
+  // 高度从 1.8 压到 1.5 是为了排版：3.2×1.8 正好是 16:9，自动取景会让
+  // 缸铺满整个屏幕高度，底部的控制条带必然压在鱼身上。压扁到 3.6×1.5
+  // （比例 2.4）之后，按宽度取景就会在上下留出余量，条带落在空水里而
+  // 不是盖住标本。宁可改缸的比例，也不去动那套为 iPad 横屏写的
+  // 全屏旋转补偿（见 scene.js 的 apply()）。
+  tank: { width: 3.6, height: 1.5, depth: 1.6 },
   // 数量：两边【相等】，密度对齐正式关卡。
   //
   // 一开始用的是 4v4，实测"太少了反而看不出来"。根因不是数量本身而是
@@ -69,12 +85,12 @@ export const T1_SPEC = deepFreeze({
   playerCount: 12,
   referenceCount: 12,
   referenceSize: 1.5,
-  referenceName: '灰鱼 · 参照体型',
+  referenceName: { en: 'Grey · reference size', zh: '灰鱼 · 参照体型' },
   // 参照鱼必须是中性色。沿用 small 鱼群的橙色会出事：橙色在正式关卡里
   // 是「猎物」的颜色，玩家会以为它天生该被吃，而 T1 的全部意义恰恰是
   // 「同一条鱼，你调大就吃它、调小就被它吃」。灰色不预设立场。
   referenceColor: '#9aa7b2',
-  playerName: '你的鱼',
+  playerName: { en: 'You', zh: '你的鱼' },
   // k=1.25 让阈值落在好念的数上：≥1.25 吃、≤0.80 被吃。
   //
   // KMax 是「猎物体型窗口上界」——正式关卡里那是「鲸不追磷虾」的生态
@@ -147,11 +163,17 @@ export function tutorialRelation(spec, value) {
 
 /** 关系 → 玩家看得懂的中文。教学关不出现 pursuit/evade 这种内部词。 */
 export const RELATION_COPY = Object.freeze({
-  pursuit: { text: '你吃它', tone: 'eat' },
-  evade: { text: '它吃你', tone: 'eaten' },
-  peer: { text: '互不理睬', tone: 'peer' },
-  ignore: { text: '互不理睬', tone: 'peer' },
+  pursuit: { en: 'Eating', zh: '你吃它', tone: 'eat' },
+  evade: { en: 'Eaten', zh: '它吃你', tone: 'eaten' },
+  peer: { en: 'Ignored', zh: '互不理睬', tone: 'peer' },
+  ignore: { en: 'Ignored', zh: '互不理睬', tone: 'peer' },
 });
+
+/** 取双语字段。传字符串就原样返回，方便逐步迁移。 */
+export function t(value, language = 'en') {
+  if (typeof value === 'string') return value;
+  return value?.[language] ?? value?.en ?? '';
+}
 
 export function createTutorialConfig(spec = T1_SPEC, value = spec.slider.initial) {
   const result = createDefaultConfig();
@@ -172,9 +194,12 @@ export function createTutorialConfig(spec = T1_SPEC, value = spec.slider.initial
   const player = requireSchool(result, PLAYER_SCHOOL_ID);
   const reference = requireSchool(result, REFERENCE_SCHOOL_ID);
 
-  Object.assign(player, { name: spec.playerName, count: spec.playerCount });
+  Object.assign(player, {
+    name: t(spec.playerName, 'zh'),
+    count: spec.playerCount,
+  });
   Object.assign(reference, {
-    name: spec.referenceName,
+    name: t(spec.referenceName, 'zh'),
     count: spec.referenceCount,
     size: spec.referenceSize,
     color: spec.referenceColor,
@@ -194,7 +219,7 @@ export function createTutorialConfig(spec = T1_SPEC, value = spec.slider.initial
   // 内部按 (总数-1) + 1 分摊。
   const filler = requireSchool(result, IDLE_SCHOOL_ID);
   Object.assign(filler, {
-    name: spec.referenceName,
+    name: t(spec.referenceName, 'zh'),
     count: 1,
     size: spec.referenceSize,
     color: spec.referenceColor,
