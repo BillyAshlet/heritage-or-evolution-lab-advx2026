@@ -437,6 +437,7 @@ export class ExperimentSimulation {
       this.config.schools,
       this.config.relations
     );
+    this._isolateChambers();
     this.metricsState.pairCount = 0;
     this.metricsState.captures = 0;
     this.metricsState.dynamicContacts = 0;
@@ -679,6 +680,7 @@ export class ExperimentSimulation {
       config.schools,
       config.relations
     );
+    this._isolateChambers();
     if (mode !== 'live') {
       this.reset(config.runtime.seed);
     } else {
@@ -1779,25 +1781,76 @@ export class ExperimentSimulation {
     set3(this.velocities, index, nextVx, nextVy, nextVz);
   }
 
+  /**
+   * 每个鱼群各自的活动包围盒。不声明 bounds 就是整缸（现有行为不变）。
+   *
+   * 这是给 T2「上下两个迷你水缸」准备的。引擎里 TANK 是模块级单例，被
+   * 7 个文件引用 39 次，真开两个缸是结构级改动；但缸壁本来就是【硬钳制】
+   * （这里直接改写坐标，不是加力），把那个盒子按鱼群拆开就够了 ——
+   * 视觉上是两个缸，机制上零泄漏。
+   *
+   * 为什么不用隔板障碍物：避障是软转向力，而且恐慌时会被
+   * panicAvoidanceSuppression 压低 —— 鱼最想穿过去的那一刻，隔板最拦不住
+   * 它。演示两个隔离的环境，不能用一堵会漏的墙。
+   */
+  /**
+   * 不同【隔间】的鱼群互相不存在：关系一律降为 ignore。
+   *
+   * 光给鱼群各自的包围盒不够 —— 盒子挡得住身体，挡不住视线。实测两个
+   * 子缸中间留 0.10m 时，捕食半径 0.33m 直接跨过隔板咬到对面（30 秒内
+   * 捕获 2 次）；就算把间隔拉到 1.0m，感知半径 1.18m 仍然覆盖整个缸高，
+   * 恐慌值照样 0.895、追击照样发起。拉宽间隔治不了根。
+   *
+   * 改关系矩阵是最省的切法：捕食、逃逸、恐慌、目标锁定全都读它，
+   * 一处降为 ignore 就等于让两边互不存在 —— 这才是"两个缸"的真实语义。
+   * 社群力（对齐/凝聚）本来就只在同鱼群内生效，不受影响。
+   */
+  _isolateChambers() {
+    const schools = this.config.schools;
+    if (!schools.some((school) => school.chamber !== undefined)) return;
+    for (let a = 0; a < schools.length; a += 1) {
+      for (let b = 0; b < schools.length; b += 1) {
+        if (a === b) continue;
+        if (schools[a].chamber === schools[b].chamber) continue;
+        this.relationMatrix[a][b] = 'ignore';
+      }
+    }
+  }
+
+  _refreshSchoolBounds() {
+    const tank = this.config.tank;
+    const margin = tank.wallMargin;
+    this._schoolBounds = this.config.schools.map((school) => {
+      const box = school.bounds;
+      return {
+        center: [box?.centerX ?? 0, box?.centerY ?? 0, box?.centerZ ?? 0],
+        half: [
+          Math.max(EPSILON, (box?.width ?? tank.width) / 2 - margin),
+          Math.max(EPSILON, (box?.height ?? tank.height) / 2 - margin),
+          Math.max(EPSILON, (box?.depth ?? tank.depth) / 2 - margin),
+        ],
+      };
+    });
+  }
+
   _integrate(index, dt) {
     if (!this.alive[index]) return;
     const offset = index * 3;
     this.positions[offset] += this.velocities[offset] * dt;
     this.positions[offset + 1] += this.velocities[offset + 1] * dt;
     this.positions[offset + 2] += this.velocities[offset + 2] * dt;
-    const half = [
-      this.config.tank.width / 2 - this.config.tank.wallMargin,
-      this.config.tank.height / 2 - this.config.tank.wallMargin,
-      this.config.tank.depth / 2 - this.config.tank.wallMargin,
-    ];
+    if (!this._schoolBounds) this._refreshSchoolBounds();
+    const bounds = this._schoolBounds[this.schoolIds[index]];
     for (let axis = 0; axis < 3; axis += 1) {
-      if (this.positions[offset + axis] < -half[axis]) {
-        this.positions[offset + axis] = -half[axis];
+      const low = bounds.center[axis] - bounds.half[axis];
+      const high = bounds.center[axis] + bounds.half[axis];
+      if (this.positions[offset + axis] < low) {
+        this.positions[offset + axis] = low;
         this.velocities[offset + axis] = Math.abs(
           this.velocities[offset + axis]
         );
-      } else if (this.positions[offset + axis] > half[axis]) {
-        this.positions[offset + axis] = half[axis];
+      } else if (this.positions[offset + axis] > high) {
+        this.positions[offset + axis] = high;
         this.velocities[offset + axis] = -Math.abs(
           this.velocities[offset + axis]
         );
@@ -2158,10 +2211,12 @@ export class ExperimentSimulation {
     this.elapsed += dt;
     this.derived = deriveExperiment(this.config);
     this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
+    this._refreshSchoolBounds();
     this.relationMatrix = this.relations.update(
       this.config.schools,
       this.config.relations
     );
+    this._isolateChambers();
     this._clearAccumulators();
     this.hash.build(this.positions, this.alive, this.count);
     this._pairPasses();
@@ -2181,10 +2236,12 @@ export class ExperimentSimulation {
   _advanceLocomotionPreview(dt) {
     this.derived = deriveExperiment(this.config);
     this.hash.cellSize = Math.max(EPSILON, this.derived.cellSize);
+    this._refreshSchoolBounds();
     this.relationMatrix = this.relations.update(
       this.config.schools,
       this.config.relations
     );
+    this._isolateChambers();
     this._clearAccumulators();
     this.hash.build(this.positions, this.alive, this.count);
     this._pairPasses(false);
