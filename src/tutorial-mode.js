@@ -25,7 +25,7 @@
  */
 
 import { createDefaultConfig } from './experiment-config.js';
-import { relationForRatio } from './experiment-model.js';
+import { effectiveMaxSpeed, relationForRatio } from './experiment-model.js';
 import { PLAYER_SCHOOL_ID } from './game-mode.js';
 
 export const TUTORIAL_PROJECT = 'tutorial';
@@ -134,7 +134,89 @@ export const T1_SPEC = deepFreeze({
   ecology: false,
 });
 
-export const TUTORIAL_SPECS = Object.freeze([T1_SPEC]);
+/**
+ * 第二课 · 速度。设计者原话：
+ *   「速度时就是两个迷你浴缸。一个里面是大型鱼，一个是小型鱼，玩家调整
+ *     中型鱼只能调整速度，大了就可以逃跑，可以追上，小了就不能做到。」
+ *
+ * 两个缸靠 school.bounds（硬钳制的每鱼群包围盒）+ school.chamber
+ * （跨隔间关系降为 ignore）实现 —— 引擎里 TANK 是单例，真开两个缸是
+ * 结构级改动；细节见 experiment-simulation.js。
+ *
+ * 玩家在【两个缸里各有一份】：上缸和大鱼比"能不能逃"，下缸和小鱼比
+ * "能不能追"。一个鱼群只能属于一个隔间，所以需要四个鱼群。
+ */
+export const T2_SPEC = deepFreeze({
+  id: 'T2',
+  axis: 'speed',
+  label: { en: 'Lesson 02', zh: '第二课' },
+  axisName: { en: 'Speed', zh: '速度' },
+  brief: {
+    en: 'Only speed can change. Watch both tanks at once: fast enough and you outrun the big fish above and catch the small fish below.',
+    zh: '只有速度可以调。同时看两个缸：够快就能甩掉上面的大鱼、追上下面的小鱼。',
+  },
+  controlHint: {
+    en: 'Hold SPACE to slow time down — chases are easier to read at half speed.',
+    zh: '按住 SPACE 放慢时间 —— 追逐在半速下看得清楚得多。',
+  },
+  // 比 T1 大：这一课要演示【追与逃】，而追逃需要空间。
+  //
+  // 一开始沿用 T1 的 3.6×1.5，子缸只有 0.70m 高、而捕食半径 0.28m ——
+  // 高度只有捕食半径的 2.1 倍，"逃"在几何上不成立。实测那一版把这一课
+  // 教反了：玩家【越快死得越快】（45→11→10 秒），因为在那种盒子里提速
+  // 只是提高遭遇频率。解析闭合速度假设的是开阔水域，小盒子里不适用。
+  //
+  // 缸高提到 2.0（子缸 0.95），宽度同步提到 4.8 好维持 2.4 的比例 ——
+  // 那个比例是给底部控制条带留空水用的（见 T1 的 tank 注释）。
+  tank: { width: 4.8, height: 2, depth: 1.6 },
+  // 两个子缸之间留 0.1m。隔间隔离之后这条缝纯粹是视觉分隔 ——
+  // 感知与捕食已经被关系矩阵切断，不再依赖间距（实测拉到 1m 也挡不住）。
+  chamberGap: 0.1,
+  chambers: [
+    { id: 'top', role: 'flee' },
+    { id: 'bottom', role: 'chase' },
+  ],
+  playerSize: 1.5,
+  playerCount: 6,
+  // 两个缸的对手数量【必须分开配】。
+  // 上缸只放 2 条大鱼：6 条时玩家是被包围的，速度再快也没地方去 ——
+  // 实测 6 条时慢/快档存活 0.0 vs 2.0，2 条时是 1.4 vs 4.0，分离度翻倍。
+  // 下缸保持 6 条小鱼：追这一课需要足够的猎物才看得出"追得上"。
+  rivalCount: { top: 2, bottom: 6 },
+  // NPC 速度：让「能逃」与「能追」在同一点翻转。
+  //
+  // NPC 与玩家同速时两个阈值差 1.94 倍（s>1.391 才逃得掉，s>0.719 就追得上），
+  // 也就是中性位上「追得上但永远逃不掉」—— 一课两个分界，玩家会以为速度
+  // 对两件事的作用不一样。把大鱼放慢到 panicSpeed/burst、小鱼加快到
+  // burst/panicSpeed，两个阈值就都落在 s=1。
+  // 这不是作弊：游戏本身的表型耦合就是「越大越慢」（size^-0.2），
+  // 这里只是把它放大到足以给这一课一个干净的分界。
+  rivalSpeed: { top: 0.719, bottom: 1.391 },
+  rivalSize: { top: 2.25, bottom: 1 },
+  rivalName: {
+    top: { en: 'Big fish', zh: '大鱼' },
+    bottom: { en: 'Small fish', zh: '小鱼' },
+  },
+  playerName: { en: 'You', zh: '你的鱼' },
+  relations: { k: 1.25, KMax: 6 },
+  // captureLengthFactor 比 T1 小得多（1.6 → 1.0）。T1 调大它是为了"吃得快"，
+  // 但对逃跑这一课那恰好是毒药：捕食半径越大，可逃的空间越小。
+  // 实测同一缸里 1.6 只能拉开 13→19→22 秒，1.0 能拉开 20→27→59 秒。
+  capture: { targetCaptureRate: 3, captureLengthFactor: 1 },
+  locomotion: { burstFactor: 1.6 },
+  captureVfx: {
+    biteGlowColor: '#16211f',
+    biteGlowRadius: 0.34,
+    biteGlowDuration: 0.55,
+    biteGlowStrength: 0.5,
+  },
+  // 初始值刻意放在【做不到】那一侧：T1 的中性档什么都不发生，被指出
+  // "画面上没有在发生事情"。这一课一进来就该看到自己被追上、也追不上。
+  slider: { min: 0.6, max: 1.6, step: 0.05, initial: 0.85 },
+  ecology: false,
+});
+
+export const TUTORIAL_SPECS = Object.freeze([T1_SPEC, T2_SPEC]);
 
 export function findTutorialSpec(id) {
   const found = TUTORIAL_SPECS.find((item) => item.id === id);
@@ -185,7 +267,111 @@ export function t(value, language = 'en') {
   return value?.[language] ?? value?.en ?? '';
 }
 
+/**
+ * 这一课的两个缸各自会发生什么。
+ *
+ * 和 T1 的 tutorialRelation 同一个原则：【转发引擎自己的量】，不在 UI 层
+ * 另写一套阈值。这里用的是 effectiveMaxSpeed —— 追击方用 burst、逃逸方用
+ * evade，两者之差为正才追得上。面板上写"逃得掉"，引擎里就必须真的逃得掉。
+ */
+export function tutorialSpeedOutcome(spec, value) {
+  const config = createTutorialConfig(spec, value);
+  const find = (id) => config.schools.find((school) => school.id === id);
+  const playerTop = find('medium');
+  const playerBottom = find('medium2') ?? playerTop;
+  const big = find('large');
+  const small = find('small');
+  // 上缸：大鱼追、玩家逃 —— 玩家的逃逸速度压过大鱼的追击速度才甩得掉。
+  const fleeMargin =
+    effectiveMaxSpeed(config, playerTop, 'evade') -
+    effectiveMaxSpeed(config, big, 'burst');
+  // 下缸：玩家追、小鱼逃。
+  const chaseMargin =
+    effectiveMaxSpeed(config, playerBottom, 'burst') -
+    effectiveMaxSpeed(config, small, 'evade');
+  return {
+    flee: fleeMargin > 0,
+    chase: chaseMargin > 0,
+    fleeMargin,
+    chaseMargin,
+  };
+}
+
+function buildChamberedConfig(spec, value) {
+  const result = createDefaultConfig();
+  Object.assign(result.runtime, {
+    project: TUTORIAL_PROJECT,
+    mode: 'steady',
+    populationPreset: 'custom',
+    timeScale: 1,
+  });
+  Object.assign(result.tank, { preset: 'game', ...spec.tank });
+  result.obstacles.enabled = false;
+  result.traits.enabled = false;
+  result.ecology.enabled = Boolean(spec.ecology);
+  result.plankton.enabled = Boolean(spec.ecology);
+  Object.assign(result.relations, spec.relations);
+  Object.assign(result.capture, spec.capture);
+  Object.assign(result.locomotion, spec.locomotion);
+  Object.assign(result.captureVfx, spec.captureVfx);
+
+  const half = (spec.tank.height - spec.chamberGap) / 2;
+  const offset = (spec.chamberGap + half) / 2;
+  const boxFor = (chamber) => ({
+    centerY: chamber === 'top' ? offset : -offset,
+    height: half,
+  });
+  const spawnY = (chamber) => boxFor(chamber).centerY / spec.tank.height;
+
+  // 玩家在两个缸里各一份。一个鱼群只能属于一个隔间，所以复制 medium。
+  const base = result.schools.find((school) => school.id === PLAYER_SCHOOL_ID);
+  const playerBottom = JSON.parse(JSON.stringify(base));
+  playerBottom.id = 'medium2';
+  result.schools.push(playerBottom);
+
+  const assign = (school, chamber, patch) => {
+    Object.assign(school, patch);
+    school.chamber = chamber;
+    school.bounds = boxFor(chamber);
+    school.spawnRegion = { ...school.spawnRegion, centerY: spawnY(chamber) };
+  };
+
+  const speed = (school, multiplier) => {
+    school.cruiseSpeed *= multiplier;
+    school.maxSpeed *= multiplier;
+  };
+
+  assign(base, 'top', {
+    name: t(spec.playerName, 'zh'),
+    count: spec.playerCount,
+    size: spec.playerSize,
+  });
+  assign(playerBottom, 'bottom', {
+    name: t(spec.playerName, 'zh'),
+    count: spec.playerCount,
+    size: spec.playerSize,
+  });
+  assign(result.schools.find((school) => school.id === 'large'), 'top', {
+    name: t(spec.rivalName.top, 'zh'),
+    count: spec.rivalCount.top,
+    size: spec.rivalSize.top,
+  });
+  assign(result.schools.find((school) => school.id === 'small'), 'bottom', {
+    name: t(spec.rivalName.bottom, 'zh'),
+    count: spec.rivalCount.bottom,
+    size: spec.rivalSize.bottom,
+  });
+  speed(result.schools.find((school) => school.id === 'large'), spec.rivalSpeed.top);
+  speed(result.schools.find((school) => school.id === 'small'), spec.rivalSpeed.bottom);
+
+  // 只动速度这一个轴，两份玩家都要动。
+  speed(base, value);
+  speed(playerBottom, value);
+  return result;
+}
+
 export function createTutorialConfig(spec = T1_SPEC, value = spec.slider.initial) {
+  if (spec.chambers) return buildChamberedConfig(spec, value);
   const result = createDefaultConfig();
 
   Object.assign(result.runtime, {

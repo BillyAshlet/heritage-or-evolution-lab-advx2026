@@ -16,6 +16,7 @@ import { ExperimentSimulation } from '../src/experiment-simulation.js';
 import {
   createTutorialConfig,
   T1_SPEC,
+  T2_SPEC,
   tutorialRelation,
   RELATION_COPY,
   t,
@@ -57,3 +58,55 @@ for (const v of [0.55, 0.7, 1.0, 1.25, 1.6, 2.0]) {
   const fk = rows.map((r) => (r.first === null ? '--' : r.first.toFixed(1))).join(' ');
   console.log(`${v.toFixed(2)}  ${label.padEnd(5)}  ${pop.padEnd(22)}  ${fk}`);
 }
+
+
+// ── T2 · 速度 ────────────────────────────────────────────────────────
+// 判读标准：上缸我方存活必须【随速度递增】（快了逃得掉），下缸小鱼存活
+// 必须【随速度递减】（快了追得上）。任何一列反过来就是回归 —— 早期版本
+// 子缸只有 0.7m 高时，上缸那一列就是反的（越快死得越快），因为在只有
+// 捕食半径两倍高的盒子里提速只是提高遭遇频率。
+function runT2(value, seed, duration = 50) {
+  const config = createTutorialConfig(T2_SPEC, value);
+  config.runtime.randomizeSeed = false;
+  config.runtime.seed = seed;
+  const sim = new ExperimentSimulation({
+    scene: null,
+    config,
+    distanceField: null,
+    physics: null,
+  });
+  const at = (id) => config.schools.findIndex((school) => school.id === id);
+  while (sim.elapsed < duration) sim._advance(DT);
+  return {
+    top: sim.aliveCount(at('medium')),
+    small: sim.aliveCount(at('small')),
+    bottom: sim.aliveCount(at('medium2')),
+    big: sim.aliveCount(at('large')),
+  };
+}
+
+const mean = (list) => list.reduce((sum, x) => sum + x, 0) / list.length;
+
+console.log('\n第二课 · 速度（50 秒 × 5 种子）');
+console.log('滑块   上缸我方存活/6   下缸小鱼存活/6');
+const t2rows = [];
+for (const value of [0.6, 0.8, 1.0, 1.2, 1.6]) {
+  const runs = SEEDS.map((seed) => runT2(value, seed));
+  const row = {
+    value,
+    top: mean(runs.map((r) => r.top)),
+    small: mean(runs.map((r) => r.small)),
+    bad: runs.filter((r) => r.big < 2 || r.bottom < 6).length,
+  };
+  t2rows.push(row);
+  console.log(
+    ` ${value.toFixed(2)}        ${row.top.toFixed(1)}              ${row.small.toFixed(1)}`
+  );
+}
+const topOk = t2rows.at(-1).top > t2rows[0].top;
+const smallOk = t2rows.at(-1).small < t2rows[0].small;
+const cleanOk = t2rows.every((row) => row.bad === 0);
+console.log(
+  `  方向: 逃 ${topOk ? '✓' : '✗ 反了'} · 追 ${smallOk ? '✓' : '✗ 反了'}` +
+    ` · 对照(大鱼/下缸我方不该死) ${cleanOk ? '✓' : '✗'}`
+);
