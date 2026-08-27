@@ -609,3 +609,48 @@ test('捕食冷却在关系翻转后重新播种（否则出生时是猎物的�
     '翻转成捕食者后冷却必须变成有限值，否则永远无法捕食'
   );
 });
+
+test('隔间隔离让两个子缸互不存在（T2 两个迷你水缸的前提）', () => {
+  // 只给包围盒是不够的：盒子挡得住身体，挡不住视线。捕食半径 0.33m 比
+  // 隔离带还宽，鱼贴着各自的墙就能咬到对面；感知半径 1.18m 更是覆盖
+  // 整个缸高，拉宽间隔治不了根。所以跨隔间的关系必须直接降为 ignore。
+  const config = createTutorialConfig(T1_SPEC, 1.6);
+  config.runtime.randomizeSeed = false;
+  config.runtime.seed = 1001;
+  const gap = 0.1;
+  const half = (config.tank.height - gap) / 2;
+  for (const school of config.schools) {
+    const top = school.id === 'medium';
+    school.chamber = top ? 'top' : 'bottom';
+    school.bounds = {
+      centerY: (top ? 1 : -1) * ((gap + half) / 2),
+      height: half,
+    };
+  }
+  const simulation = new ExperimentSimulation({
+    scene: null,
+    config,
+    distanceField: null,
+    physics: null,
+  });
+
+  const player = config.schools.findIndex((school) => school.id === 'medium');
+  const other = config.schools.findIndex((school) => school.id !== 'medium');
+  assert.equal(simulation.relationMatrix[player][other], 'ignore');
+  assert.equal(simulation.relationMatrix[other][player], 'ignore');
+
+  const before = config.schools.map((_, index) => simulation.aliveCount(index));
+  for (let frame = 0; frame < 60 * 20; frame += 1) simulation._advance(1 / 60);
+
+  // 隔离生效时谁也吃不到谁，而且没有一条鱼越过自己的盒子。
+  config.schools.forEach((_, index) => {
+    assert.equal(simulation.aliveCount(index), before[index]);
+  });
+  for (let index = 0; index < simulation.count; index += 1) {
+    if (!simulation.alive[index]) continue;
+    const bounds = simulation._schoolBounds[simulation.schoolIds[index]];
+    const y = simulation.positions[index * 3 + 1];
+    assert.ok(y >= bounds.center[1] - bounds.half[1] - 1e-6);
+    assert.ok(y <= bounds.center[1] + bounds.half[1] + 1e-6);
+  }
+});

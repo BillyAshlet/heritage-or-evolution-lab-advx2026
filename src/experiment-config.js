@@ -1408,7 +1408,21 @@ function schoolEntries(config) {
     const group = `鱼群 · ${item.name}`;
     const gamePlayer =
       config.runtime?.project === 'game' && item.id === 'medium';
+    // bounds / chamber 是【可选】字段（每鱼群包围盒与隔间隔离，见
+    // experiment-simulation.js 的 _refreshSchoolBounds / _isolateChambers）。
+    // 校验器是双向的 —— 未登记的字段报错，已登记但缺失的字段同样报错，
+    // 所以只能按鱼群实际声明了什么来生成，不能无条件登记。
+    const optional = [];
+    if (item.chamber !== undefined) {
+      optional.push(entry(`${p}.chamber`, group, '隔间', 'rebuildScene'));
+    }
+    if (item.bounds && typeof item.bounds === 'object') {
+      for (const key of Object.keys(item.bounds)) {
+        optional.push(entry(`${p}.bounds.${key}`, group, `活动范围 · ${key}`, 'live'));
+      }
+    }
     return [
+      ...optional,
       entry(`${p}.id`, group, 'id', 'rebuildScene'),
       entry(`${p}.name`, group, 'name', 'rebuildScene'),
       entry(`${p}.color`, group, 'color', 'live'),
