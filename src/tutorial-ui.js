@@ -42,17 +42,23 @@ const CSS = `
   --t-dim: #6d7c7a;
   --t-line: #c3cccb;
   --t-tick: #aab5b4;
-  --t-eaten: #8b5f5c;
-  --t-eaten-band: #e0d3d1;
-  --t-peer-band: #e3e7e6;
-  --t-eat: #1f6d4e;
-  --t-eat-band: #cfdcd4;
   --t-amber: #c4892a;
-  /* 连续刻度的两端与中点。沿用 T1 的语义色，做过 T1 的玩家直接读得懂。 */
-  --t-slow: #b98a86;
-  --t-neutral: #9aa7a4;
-  --t-fast: #6aa98c;
-  --t-now: #9aa7a4;
+
+  /* 刻度用【单一色相的明度阶梯】，不用红绿。
+   *
+   * 红绿是"对/错"的配色，而这一课没有指标、没有输赢 —— 给"你吃它"
+   * 涂绿色等于偷偷告诉玩家往右边走才对，把观察变成了优化，正好是这套
+   * 设计要避免的事。（红绿也是最常见的色盲轴，约 8% 的男性读不出。）
+   *
+   * 所以：颜色只编码【量】（体型/速度在变大），文字编码【意思】
+   * （它吃你 / 互不理睬 / 你吃它）。实验室仪器不会告诉你哪个读数是对的。 */
+  --t-step-1: #dfe4e3;
+  --t-step-2: #b9c2c0;
+  --t-step-3: #8e9a97;
+  --t-slow: #d3dad8;
+  --t-neutral: #a9b3b0;
+  --t-fast: #6f7d79;
+  --t-now: #a9b3b0;
 
   position: fixed;
   left: 0;
@@ -171,9 +177,10 @@ const CSS = `
   display: flex; overflow: hidden;
 }
 #tutorial-ui .t-bands span { display: block; height: 100%; }
-#tutorial-ui .t-band-eaten { background: var(--t-eaten-band); }
-#tutorial-ui .t-band-peer  { background: var(--t-peer-band); }
-#tutorial-ui .t-band-eat   { background: var(--t-eat-band); }
+/* 三段按【体型由小到大】排明度，不按好坏排颜色。 */
+#tutorial-ui .t-band-eaten { background: var(--t-step-1); }
+#tutorial-ui .t-band-peer  { background: var(--t-step-2); }
+#tutorial-ui .t-band-eat   { background: var(--t-step-3); }
 
 /* 连续刻度（T2）：不分段。
    两层叠加 —— 底层是固定的方向渐变（慢在左、快在右，这是"地图"），
@@ -220,9 +227,8 @@ const CSS = `
   white-space: nowrap;
   pointer-events: none;
 }
-#tutorial-ui .t-zone[data-tone="eaten"] { color: var(--t-eaten); }
-#tutorial-ui .t-zone[data-tone="peer"]  { color: var(--t-dim); }
-#tutorial-ui .t-zone[data-tone="eat"]   { color: var(--t-eat); }
+/* 区间文字一律同色 —— 含义由字本身承担，不由颜色暗示立场。 */
+#tutorial-ui .t-zone { color: var(--t-dim); }
 
 #tutorial-ui .t-cursor {
   position: absolute; top: 6px; width: 2px; height: 28px;
@@ -277,9 +283,8 @@ const CSS = `
   font-variation-settings: 'wght' 300;
   letter-spacing: 0.02em;
 }
-#tutorial-ui .t-state[data-tone="eaten"] strong { color: var(--t-eaten); }
-#tutorial-ui .t-state[data-tone="peer"]  strong { color: var(--t-dim); }
-#tutorial-ui .t-state[data-tone="eat"]   strong { color: var(--t-eat); }
+/* 状态行同理：读数用墨色，不涂成"对"或"错"。 */
+#tutorial-ui .t-state strong { color: var(--t-ink); }
 
 /* 分缸暂停。两个缸同时在追逐时观察者应接不暇，而这一课的意义就是"看清"。
    按下的那一半用实底表示"这半停住了"，与语言开关的选中态同一套视觉。 */
@@ -394,7 +399,8 @@ function mixHex(from, to, ratio) {
   );
 }
 
-const SCALE_COLORS = { slow: '#b98a86', neutral: '#9aa7a4', fast: '#6aa98c' };
+// 与 CSS 里的 --t-slow / --t-neutral / --t-fast 对应，同一条明度阶梯。
+const SCALE_COLORS = { slow: '#d3dad8', neutral: '#a9b3b0', fast: '#6f7d79' };
 
 function toPercent(spec, value) {
   const { min, max } = spec.slider;
