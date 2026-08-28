@@ -546,11 +546,7 @@ export class TutorialUI {
     root.querySelector('#t-pause')?.addEventListener('click', (event) => {
       const button = event.target.closest('button[data-chamber]');
       if (!button) return;
-      const chamber = button.dataset.chamber;
-      if (this.paused.has(chamber)) this.paused.delete(chamber);
-      else this.paused.add(chamber);
-      this.callbacks.onPauseChange?.([...this.paused]);
-      this.render(this.value);
+      this.togglePause(button.dataset.chamber);
     });
     root.querySelector('#t-fold').addEventListener('click', () => this.toggleFold());
     root.querySelector('#t-reset').addEventListener('click', () => this.callbacks.onReset?.());
@@ -561,6 +557,14 @@ export class TutorialUI {
 
   setLanguage(language) {
     this.language = language === 'zh' ? 'zh' : 'en';
+    this.render(this.value);
+  }
+
+  /** 从外部（点击缸体）切换暂停。UI 与仿真只有这一条同步路径。 */
+  togglePause(chamber) {
+    if (this.paused.has(chamber)) this.paused.delete(chamber);
+    else this.paused.add(chamber);
+    this.callbacks.onPauseChange?.([...this.paused]);
     this.render(this.value);
   }
 

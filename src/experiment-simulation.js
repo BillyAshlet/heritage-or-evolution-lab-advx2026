@@ -22,6 +22,8 @@ import { sceneClearance, tankWallClearance } from './distance-field.js';
 import { CaptureVfx } from './capture-vfx.js';
 
 const EPSILON = 1e-8;
+const CHAMBER_EASE_RATE = 4;
+const CHAMBER_STOP_EPSILON = 0.02;
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const LOCOMOTION = Object.freeze({
   CRUISE: 0,
@@ -1830,17 +1832,43 @@ export class ExperimentSimulation {
    */
   setFrozenChambers(chambers = []) {
     const frozen = new Set(chambers);
-    if (!this.frozenSchools || this.frozenSchools.length !== this.config.schools.length) {
-      this.frozenSchools = new Uint8Array(this.config.schools.length);
+    const count = this.config.schools.length;
+    if (!this.chamberTargets || this.chamberTargets.length !== count) {
+      this.chamberTargets = new Float32Array(count).fill(1);
+      this.chamberScales = new Float32Array(count).fill(1);
     }
     this.config.schools.forEach((school, index) => {
-      this.frozenSchools[index] =
-        school.chamber !== undefined && frozen.has(school.chamber) ? 1 : 0;
+      this.chamberTargets[index] =
+        school.chamber !== undefined && frozen.has(school.chamber) ? 0 : 1;
     });
   }
 
+  /**
+   * 让每个隔间的时间倍率【指数逼近】目标，而不是瞬间切到 0/1。
+   *
+   * 硬冻结的观感是"卡住"，缓入缓出的观感才是"停下来"。逼近到阈值以下就
+   * 吸附到 0 —— 指数曲线永远到不了 0，不吸附的话鱼会以肉眼看不见的速度
+   * 永远漂移，而且捕食判定也一直在跑。
+   */
+  _easeChamberScales(dt) {
+    if (!this.chamberTargets) return;
+    const k = 1 - Math.exp(-CHAMBER_EASE_RATE * dt);
+    for (let i = 0; i < this.chamberTargets.length; i += 1) {
+      const target = this.chamberTargets[i];
+      let value = this.chamberScales[i] + (target - this.chamberScales[i]) * k;
+      if (target === 0 && value < CHAMBER_STOP_EPSILON) value = 0;
+      else if (target === 1 && value > 1 - CHAMBER_STOP_EPSILON) value = 1;
+      this.chamberScales[i] = value;
+    }
+  }
+
+  /** 这条鱼当前的时间倍率。1 = 正常，0 = 完全停住。 */
+  _timeScaleFor(index) {
+    return this.chamberScales?.[this.schoolIds[index]] ?? 1;
+  }
+
   _isFrozen(index) {
-    return this.frozenSchools?.[this.schoolIds[index]] === 1;
+    return this._timeScaleFor(index) === 0;
   }
 
   _refreshSchoolBounds() {
@@ -2142,7 +2170,10 @@ export class ExperimentSimulation {
   _capture(dt) {
     for (let index = 0; index < this.count; index += 1) {
       if (!this.alive[index]) continue;
-      this.cooldowns[index] = Math.max(0, this.cooldowns[index] - dt);
+      this.cooldowns[index] = Math.max(
+        0,
+        this.cooldowns[index] - dt * this._timeScaleFor(index)
+      );
     }
     for (let predator = 0; predator < this.count; predator += 1) {
       const prey = this.pursuitTargets[predator];
@@ -2246,13 +2277,14 @@ export class ExperimentSimulation {
     this._isolateChambers();
     this._clearAccumulators();
     this.hash.build(this.positions, this.alive, this.count);
+    this._easeChamberScales(dt);
     this._pairPasses();
     for (let index = 0; index < this.count; index += 1) {
-      this._steerFish(index, dt);
+      this._steerFish(index, dt * this._timeScaleFor(index));
     }
     this._updateChaseTelemetry(dt);
     for (let index = 0; index < this.count; index += 1) {
-      this._integrate(index, dt);
+      this._integrate(index, dt * this._timeScaleFor(index));
     }
     this._capture(dt);
     this._updateEcology(dt);

@@ -31,6 +31,7 @@ import { GameUI } from './game-ui.js';
 import {
   T1_SPEC,
   TUTORIAL_SPECS,
+  tutorialChamberBoxes,
   TUTORIAL_PROJECT,
   createTutorialConfig,
   findTutorialSpec,
@@ -333,14 +334,12 @@ async function bootstrap() {
       presentation.setTankChambers(null);
       return;
     }
-    const half = (spec.tank.height - spec.chamberGap) / 2;
-    const offset = (spec.chamberGap + half) / 2;
-    // 必须和 tutorial-mode.js 的 boxFor 用同一个位移，否则盒子和鱼会错位。
-    const shift = spec.stageShiftY ?? 0;
-    presentation.setTankChambers([
-      { centerY: offset + shift, height: half },
-      { centerY: -offset + shift, height: half },
-    ]);
+    presentation.setTankChambers(
+      tutorialChamberBoxes(spec).map(({ centerY, height }) => ({
+        centerY,
+        height,
+      }))
+    );
   }
 
   const DEFAULT_SCENE_BG = '#f4efe6';
@@ -939,6 +938,49 @@ async function bootstrap() {
       if (developerMode) exitDeveloperMode();
     });
   }
+
+  // 点击缸体 = 暂停/继续那一半。
+  //
+  // 按钮已经能做同样的事，但按钮在屏幕下方、鱼在上方 —— 想停住正在看的
+  // 那一缸，视线得来回跑。直接点它才是这个动作该有的样子。
+  // 打到鱼就让开：点鱼看视角是 T1 教的操作，两者不该抢同一次点击。
+  const tutorialRay = new THREE.Raycaster();
+  const tutorialPointer = new THREE.Vector2();
+  const tutorialBox = new THREE.Box3();
+  const tutorialHit = new THREE.Vector3();
+  renderer.domElement.addEventListener('click', (event) => {
+    if (current.runtime.project !== TUTORIAL_PROJECT) return;
+    if (!tutorialSpec?.chambers || !tutorialUI) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    tutorialPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    tutorialPointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    tutorialRay.setFromCamera(tutorialPointer, camera);
+    if (
+      simulation.mesh &&
+      tutorialRay.intersectObject(simulation.mesh, false).length > 0
+    ) {
+      return;
+    }
+    // 和【整个缸体盒子】求交，不是和某一层截面。
+    // 第一版拿 z=0 的中层截面判定，结果可点区域比看得见的缸窄得多 ——
+    // 缸有 1.6m 厚，透视下前后面在屏幕上差很远，点在看得见的地方却打空。
+    const tank = tutorialSpec.tank;
+    let picked = null;
+    let nearest = Infinity;
+    for (const item of tutorialChamberBoxes(tutorialSpec)) {
+      tutorialBox.set(
+        new THREE.Vector3(-tank.width / 2, item.centerY - item.height / 2, -tank.depth / 2),
+        new THREE.Vector3(tank.width / 2, item.centerY + item.height / 2, tank.depth / 2)
+      );
+      if (!tutorialRay.ray.intersectBox(tutorialBox, tutorialHit)) continue;
+      const distance = tutorialRay.ray.origin.distanceToSquared(tutorialHit);
+      if (distance < nearest) {
+        nearest = distance;
+        picked = item.id;
+      }
+    }
+    if (picked) tutorialUI.togglePause(picked);
+  });
 
   applyTutorialRoute();
   window.addEventListener('popstate', () => {

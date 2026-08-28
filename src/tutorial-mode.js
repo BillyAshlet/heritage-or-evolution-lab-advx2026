@@ -322,6 +322,23 @@ export function tutorialSpeedOutcome(spec, value) {
   };
 }
 
+/**
+ * 两个子缸的几何。【唯一来源】—— 视觉盒子（main.js）、鱼的活动范围
+ * 与出生点（本文件）、点击命中判定（main.js）都读它。
+ * 之前这段算式在两处各写了一遍，任何一处改了另一处就会错位。
+ */
+export function tutorialChamberBoxes(spec) {
+  if (!spec?.chambers) return [];
+  const half = (spec.tank.height - spec.chamberGap) / 2;
+  const offset = (spec.chamberGap + half) / 2;
+  const shift = spec.stageShiftY ?? 0;
+  return spec.chambers.map((chamber) => ({
+    id: chamber.id,
+    centerY: (chamber.id === 'top' ? offset : -offset) + shift,
+    height: half,
+  }));
+}
+
 function buildChamberedConfig(spec, value) {
   const result = createDefaultConfig();
   Object.assign(result.runtime, {
@@ -340,13 +357,13 @@ function buildChamberedConfig(spec, value) {
   Object.assign(result.locomotion, spec.locomotion);
   Object.assign(result.captureVfx, spec.captureVfx);
 
-  const half = (spec.tank.height - spec.chamberGap) / 2;
-  const offset = (spec.chamberGap + half) / 2;
-  const shift = spec.stageShiftY ?? 0;
-  const boxFor = (chamber) => ({
-    centerY: (chamber === 'top' ? offset : -offset) + shift,
-    height: half,
-  });
+  const boxes = new Map(
+    tutorialChamberBoxes(spec).map((box) => [box.id, box])
+  );
+  const boxFor = (chamber) => {
+    const box = boxes.get(chamber);
+    return { centerY: box.centerY, height: box.height };
+  };
   const spawnY = (chamber) => boxFor(chamber).centerY / spec.tank.height;
 
   // 玩家在两个缸里各一份。一个鱼群只能属于一个隔间，所以复制 medium。
