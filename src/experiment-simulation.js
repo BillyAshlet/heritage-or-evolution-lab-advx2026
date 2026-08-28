@@ -1371,6 +1371,7 @@ export class ExperimentSimulation {
   }
 
   _steerFish(index, dt, interactionsEnabled = true) {
+    if (this._isFrozen(index)) return;
     if (!this.alive[index]) return;
     if (interactionsEnabled) this._resolveLock(index, dt);
     const offset = index * 3;
@@ -1817,6 +1818,31 @@ export class ExperimentSimulation {
     }
   }
 
+  /**
+   * 冻结某些隔间：那一半的鱼原地不动，也不参与任何捕食。
+   *
+   * T2 同屏有两个缸，两边同时在追逐时观察者应接不暇 —— 而这一课的全部
+   * 意义就是"看清"。冻结做成【按隔间】而不是全局暂停：全局停只是两边
+   * 一起停，分缸停才能一次只看一个。
+   *
+   * 走运行时状态而不是 config，是因为改 config 会触发校验与重建 ——
+   * 暂停不该让鱼重排。
+   */
+  setFrozenChambers(chambers = []) {
+    const frozen = new Set(chambers);
+    if (!this.frozenSchools || this.frozenSchools.length !== this.config.schools.length) {
+      this.frozenSchools = new Uint8Array(this.config.schools.length);
+    }
+    this.config.schools.forEach((school, index) => {
+      this.frozenSchools[index] =
+        school.chamber !== undefined && frozen.has(school.chamber) ? 1 : 0;
+    });
+  }
+
+  _isFrozen(index) {
+    return this.frozenSchools?.[this.schoolIds[index]] === 1;
+  }
+
   _refreshSchoolBounds() {
     const tank = this.config.tank;
     const margin = tank.wallMargin;
@@ -1834,7 +1860,7 @@ export class ExperimentSimulation {
   }
 
   _integrate(index, dt) {
-    if (!this.alive[index]) return;
+    if (!this.alive[index] || this._isFrozen(index)) return;
     const offset = index * 3;
     this.positions[offset] += this.velocities[offset] * dt;
     this.positions[offset + 1] += this.velocities[offset + 1] * dt;
@@ -2121,6 +2147,7 @@ export class ExperimentSimulation {
     for (let predator = 0; predator < this.count; predator += 1) {
       const prey = this.pursuitTargets[predator];
       if (
+        this._isFrozen(predator) ||
         !this.alive[predator] ||
         prey < 0 ||
         !this.alive[prey] ||

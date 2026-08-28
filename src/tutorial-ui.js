@@ -43,6 +43,11 @@ const CSS = `
   --t-eat: #1f6d4e;
   --t-eat-band: #cfdcd4;
   --t-amber: #c4892a;
+  /* 连续刻度的两端与中点。沿用 T1 的语义色，做过 T1 的玩家直接读得懂。 */
+  --t-slow: #b98a86;
+  --t-neutral: #9aa7a4;
+  --t-fast: #6aa98c;
+  --t-now: #9aa7a4;
 
   position: fixed;
   left: 0;
@@ -153,6 +158,38 @@ const CSS = `
 #tutorial-ui .t-band-peer  { background: var(--t-peer-band); }
 #tutorial-ui .t-band-eat   { background: var(--t-eat-band); }
 
+/* 连续刻度（T2）：不分段。
+   两层叠加 —— 底层是固定的方向渐变（慢在左、快在右，这是"地图"），
+   上层是按当前位置采样出的单色，整条因此随位置改变色调（这是"状态"）。
+   地图不动、状态在动，两件事分开表达。 */
+#tutorial-ui .t-gradient {
+  position: absolute; left: 0; right: 0; top: 15px; height: 10px;
+  background:
+    linear-gradient(90deg, var(--t-now) 0%, var(--t-now) 100%),
+    linear-gradient(90deg, var(--t-slow) 0%, var(--t-neutral) 50%, var(--t-fast) 100%);
+  background-blend-mode: normal;
+  transition: background 160ms ease;
+}
+#tutorial-ui .t-gradient::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, var(--t-slow), var(--t-neutral), var(--t-fast));
+  opacity: 0.45;
+}
+/* 中点刻度：唯一一条线，标的是"与对手同速"这个客观事实，不是阈值。 */
+#tutorial-ui .t-midtick {
+  position: absolute; top: 11px; width: 1px; height: 18px;
+  background: var(--t-ink); opacity: 0.35; transform: translateX(-50%);
+  pointer-events: none;
+}
+#tutorial-ui .t-midlabel {
+  position: absolute; top: 31px;
+  font-size: 0.6rem;
+  font-variation-settings: 'wght' 200;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--t-dim); transform: translateX(-50%);
+  white-space: nowrap; pointer-events: none;
+}
+
 #tutorial-ui .t-ticks { position: absolute; left: 0; right: 0; top: 15px; height: 10px; }
 #tutorial-ui .t-ticks i { position: absolute; top: 0; width: 1px; height: 100%; background: var(--t-tick); }
 
@@ -227,6 +264,20 @@ const CSS = `
 #tutorial-ui .t-state[data-tone="peer"]  strong { color: var(--t-dim); }
 #tutorial-ui .t-state[data-tone="eat"]   strong { color: var(--t-eat); }
 
+/* 分缸暂停。两个缸同时在追逐时观察者应接不暇，而这一课的意义就是"看清"。
+   按下的那一半用实底表示"这半停住了"，与语言开关的选中态同一套视觉。 */
+#tutorial-ui .t-pause { display: flex; gap: 8px; }
+#tutorial-ui .t-pause button {
+  font-size: clamp(0.68rem, 1.1vw, 0.76rem);
+  letter-spacing: 0.1em;
+  padding: 7px 12px;
+}
+#tutorial-ui .t-pause button[aria-pressed="true"] {
+  color: var(--t-raise);
+  background: var(--t-ink);
+  border-color: var(--t-ink);
+}
+
 #tutorial-ui .t-acts { display: flex; gap: 10px; flex-shrink: 0; }
 #tutorial-ui .t-acts button {
   font-size: clamp(0.72rem, 1.2vw, 0.82rem);
@@ -292,12 +343,41 @@ const UI_COPY = {
   grey: { en: 'Grey', zh: '灰鱼' },
   ratio: { en: 'Ratio', zh: '体型比' },
   result: { en: 'Result', zh: '结果' },
+  sameSpeed: { en: 'Same speed', zh: '与对手同速' },
+  faster: { en: 'Faster', zh: '比对手快' },
+  slower: { en: 'Slower', zh: '比对手慢' },
+  matched: { en: 'Matched', zh: '同速' },
+  bigFish: { en: 'Big fish', zh: '大鱼' },
+  smallFish: { en: 'Small fish', zh: '小鱼' },
+  pauseTop: { en: 'Pause top', zh: '暂停上缸' },
+  pauseBottom: { en: 'Pause bottom', zh: '暂停下缸' },
+  resumeTop: { en: 'Resume top', zh: '继续上缸' },
+  resumeBottom: { en: 'Resume bottom', zh: '继续下缸' },
   rerun: { en: 'Re-run', zh: '重新开始' },
   understood: { en: 'I understand', zh: '我明白了' },
   skip: { en: 'Skip', zh: '跳过教学' },
   fold: { en: 'Fold', zh: '收起' },
   unfold: { en: 'Unfold', zh: '展开' },
 };
+
+/** 两个 #rrggbb 之间线性插值。用于把"你比对手快多少"变成一个色调。 */
+function mixHex(from, to, ratio) {
+  const parse = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [a, b] = [parse(from), parse(to)];
+  const k = Math.min(1, Math.max(0, ratio));
+  return (
+    '#' +
+    a
+      .map((channel, i) =>
+        Math.round(channel + (b[i] - channel) * k)
+          .toString(16)
+          .padStart(2, '0')
+      )
+      .join('')
+  );
+}
+
+const SCALE_COLORS = { slow: '#b98a86', neutral: '#9aa7a4', fast: '#6aa98c' };
 
 function toPercent(spec, value) {
   const { min, max } = spec.slider;
@@ -309,6 +389,7 @@ export class TutorialUI {
     spec,
     language = 'en',
     onValueChange,
+    onPauseChange,
     onReset,
     onNext,
     onExit,
@@ -317,10 +398,11 @@ export class TutorialUI {
     ensureStyle();
     this.spec = spec;
     this.language = language === 'zh' ? 'zh' : 'en';
-    this.callbacks = { onValueChange, onReset, onNext, onExit, onLanguageChange };
+    this.callbacks = { onValueChange, onReset, onNext, onExit, onLanguageChange, onPauseChange };
     this.value = spec.slider.initial;
     this.folded = false;
-    this.bands = this._bands();
+    this.paused = new Set();
+    this.bands = spec.scaleStyle === 'gradient' ? [] : this._bands();
     this.root = this._build();
     document.getElementById('app').appendChild(this.root);
     this.render(this.value);
@@ -364,6 +446,9 @@ export class TutorialUI {
     root.id = 'tutorial-ui';
     root.setAttribute('aria-label', t(spec.label, this.language));
 
+    const gradient = spec.scaleStyle === 'gradient';
+    // 中点 = 与对手同速。滑块值 1.0 就是那个点。
+    const midPercent = toPercent(spec, 1);
     const bandMarkup = this.bands
       .map(
         (band) =>
@@ -404,9 +489,15 @@ export class TutorialUI {
         <div class="t-rule-row">
           <span class="t-rule-label" id="t-rule-label"></span>
           <div class="t-rule">
-            <div class="t-bands">${bandMarkup}</div>
+            ${
+              gradient
+                ? `<div class="t-gradient"></div>
+            <div class="t-midtick" style="left:${midPercent}%"></div>
+            <span class="t-midlabel" id="t-midlabel" style="left:${midPercent}%"></span>`
+                : `<div class="t-bands">${bandMarkup}</div>
             <div class="t-ticks">${tickMarkup}</div>
-            ${zoneMarkup}
+            ${zoneMarkup}`
+            }
             <div class="t-cursor" id="t-cursor"></div>
             <div class="t-readout" id="t-readout">
               <div class="t-cell"><b id="t-lbl-you"></b><u id="t-you">—</u></div>
@@ -418,6 +509,14 @@ export class TutorialUI {
           </div>
         </div>
         <div class="t-foot">
+          ${
+            spec.chambers
+              ? `<div class="t-pause" role="group" id="t-pause">
+            <button type="button" data-chamber="top" aria-pressed="false"></button>
+            <button type="button" data-chamber="bottom" aria-pressed="false"></button>
+          </div>`
+              : ''
+          }
           <div class="t-state" id="t-state">
             <b id="t-lbl-result"></b><strong id="t-result">—</strong>
           </div>
@@ -444,6 +543,15 @@ export class TutorialUI {
       this.setLanguage(button.dataset.lang);
       this.callbacks.onLanguageChange?.(this.language);
     });
+    root.querySelector('#t-pause')?.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-chamber]');
+      if (!button) return;
+      const chamber = button.dataset.chamber;
+      if (this.paused.has(chamber)) this.paused.delete(chamber);
+      else this.paused.add(chamber);
+      this.callbacks.onPauseChange?.([...this.paused]);
+      this.render(this.value);
+    });
     root.querySelector('#t-fold').addEventListener('click', () => this.toggleFold());
     root.querySelector('#t-reset').addEventListener('click', () => this.callbacks.onReset?.());
     root.querySelector('#t-next').addEventListener('click', () => this.callbacks.onNext?.());
@@ -465,8 +573,12 @@ export class TutorialUI {
   render(value = this.value) {
     const spec = this.spec;
     const q = (id) => this.root.querySelector(id);
-    const ratio = tutorialSizeRatio(spec, value);
-    const relation = tutorialRelation(spec, value);
+    // T1 的读数是体型三件套，T2 是速度三件套 —— 字段都不一样，
+    // 不分流会直接读到 undefined（第一版就是这么崩的：T2 没有
+    // referenceSize，render 里 .toFixed 直接抛，整个 app 启动失败）。
+    const gradient = spec.scaleStyle === 'gradient';
+    const ratio = gradient ? value : tutorialSizeRatio(spec, value);
+    const relation = gradient ? 'peer' : tutorialRelation(spec, value);
     const copy = RELATION_COPY[relation] ?? RELATION_COPY.peer;
 
     this.root.dataset.lang = this.language;
@@ -474,15 +586,29 @@ export class TutorialUI {
     q('#t-title').textContent = t(spec.axisName, this.language);
     q('#t-brief').textContent = t(spec.brief, this.language);
     q('#t-hint').textContent = t(spec.controlHint, this.language);
-    q('#t-rule-label').textContent = this._text('size');
+    q('#t-rule-label').textContent = t(spec.axisName, this.language);
     q('#t-lbl-you').textContent = this._text('you');
-    q('#t-lbl-grey').textContent = this._text('grey');
-    q('#t-lbl-ratio').textContent = this._text('ratio');
+    q('#t-lbl-grey').textContent = gradient
+      ? this._text('bigFish')
+      : this._text('grey');
+    q('#t-lbl-ratio').textContent = gradient
+      ? this._text('smallFish')
+      : this._text('ratio');
     q('#t-lbl-result').textContent = this._text('result');
     q('#t-reset').textContent = this._text('rerun');
     q('#t-next').textContent = this._text('understood');
     q('#t-exit').textContent = this._text('skip');
     q('#t-fold').textContent = this.folded ? this._text('unfold') : this._text('fold');
+    this.root.querySelectorAll('#t-pause button').forEach((button) => {
+      const chamber = button.dataset.chamber;
+      const held = this.paused.has(chamber);
+      button.setAttribute('aria-pressed', String(held));
+      const key =
+        chamber === 'top'
+          ? held ? 'resumeTop' : 'pauseTop'
+          : held ? 'resumeBottom' : 'pauseBottom';
+      button.textContent = this._text(key);
+    });
 
     this.root.querySelectorAll('.t-zone').forEach((node, index) => {
       const band = this.bands[index];
@@ -501,23 +627,59 @@ export class TutorialUI {
         )
       );
 
-    const activeIndex = this.bands.findIndex((band) => band.relation === relation);
-    this.root.querySelectorAll('.t-bands span').forEach((node, index) => {
-      node.dataset.active = index === activeIndex ? '1' : '';
-    });
-    this.root.querySelectorAll('.t-zone').forEach((node, index) => {
-      node.dataset.active = index === activeIndex ? '1' : '';
-    });
+    if (spec.scaleStyle === 'gradient') {
+      // 色调只跟【速度】走，不对结果做任何断言 —— 玩家读到的是"我比对手
+      // 快还是慢"这个自己完全控制的事实，而不是一个可能落空的预测。
+      // 中点 1.0 = 与对手同速。
+      const span = value >= 1 ? spec.slider.max - 1 : 1 - spec.slider.min;
+      const lean = span > 0 ? Math.abs(value - 1) / span : 0;
+      const target = value >= 1 ? SCALE_COLORS.fast : SCALE_COLORS.slow;
+      this.root.style.setProperty(
+        '--t-now',
+        mixHex(SCALE_COLORS.neutral, target, lean)
+      );
+      const midLabel = q('#t-midlabel');
+      if (midLabel) midLabel.textContent = this._text('sameSpeed');
+    } else {
+      const activeIndex = this.bands.findIndex(
+        (band) => band.relation === relation
+      );
+      this.root.querySelectorAll('.t-bands span').forEach((node, index) => {
+        node.dataset.active = index === activeIndex ? '1' : '';
+      });
+      this.root.querySelectorAll('.t-zone').forEach((node, index) => {
+        node.dataset.active = index === activeIndex ? '1' : '';
+      });
+    }
 
     const percent = toPercent(spec, value);
     q('#t-cursor').style.left = `${percent}%`;
     // 读数卡贴着游标走，两端要收住，否则会被轨道边缘裁掉。
     q('#t-readout').style.left = `${Math.min(88, Math.max(12, percent))}%`;
-    q('#t-you').textContent = (spec.referenceSize * ratio).toFixed(2);
-    q('#t-grey').textContent = spec.referenceSize.toFixed(2);
-    q('#t-ratio').textContent = ratio.toFixed(2);
-    q('#t-result').textContent = t(copy, this.language);
-    q('#t-state').dataset.tone = copy.tone;
+    if (gradient) {
+      // 读数直接给出「你 / 大鱼 / 小鱼」三者的速度倍率 —— 玩家在比什么，
+      // 就把什么摆出来，不用他心算。
+      q('#t-you').textContent = `×${value.toFixed(2)}`;
+      q('#t-grey').textContent = `×${spec.rivalSpeed.top.toFixed(2)}`;
+      q('#t-ratio').textContent = `×${spec.rivalSpeed.bottom.toFixed(2)}`;
+    } else {
+      q('#t-you').textContent = (spec.referenceSize * ratio).toFixed(2);
+      q('#t-grey').textContent = spec.referenceSize.toFixed(2);
+      q('#t-ratio').textContent = ratio.toFixed(2);
+    }
+    if (spec.scaleStyle === 'gradient') {
+      const delta = Math.round((value - 1) * 100);
+      q('#t-lbl-result').textContent = t(spec.axisName, this.language);
+      q('#t-result').textContent =
+        delta === 0
+          ? this._text('matched')
+          : `${this._text(delta > 0 ? 'faster' : 'slower')} ${Math.abs(delta)}%`;
+      q('#t-state').dataset.tone =
+        delta === 0 ? 'peer' : delta > 0 ? 'eat' : 'eaten';
+    } else {
+      q('#t-result').textContent = t(copy, this.language);
+      q('#t-state').dataset.tone = copy.tone;
+    }
   }
 
   setHidden(hidden) {

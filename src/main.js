@@ -270,6 +270,7 @@ async function bootstrap() {
     // 后来查明是自动化环境里标签页 visibilityState=hidden、rAF 被浏览器
     // 挂起导致整个渲染循环没在跑，与本项目代码无关。
     simulation.beginGameplayFromPreview();
+    simulation.setFrozenChambers(tutorialUI ? [...tutorialUI.paused] : []);
     world.resetTiming(performance.now());
   }
 
@@ -320,6 +321,58 @@ async function bootstrap() {
   // 后壁处最多褪去多少。0.7 试过 —— 纵深是出来了，但整缸发糊，
   // 鱼的固有色被稀释，反而不容易比体型。0.3 保留纵深又让每条鱼都实。
   const DEPTH_CUE_MAX_FADE = 0.3;
+
+  // 分缸隔板。纯视觉 —— 隔离早就由 school.bounds（硬钳制）和
+  // school.chamber（跨隔间关系降为 ignore）保证了，这块板不参与任何判定。
+  // 但没有它，"两个缸"就只是一句设定：玩家看到的是一缸里混着三种鱼。
+  let chamberDivider = null;
+  function applyChamberDivider(spec) {
+    const wanted = Boolean(spec?.chambers);
+    if (!wanted) {
+      if (chamberDivider) {
+        chamberDivider.removeFromParent();
+        chamberDivider.traverse((node) => {
+          node.geometry?.dispose();
+          node.material?.dispose();
+        });
+        chamberDivider = null;
+      }
+      return;
+    }
+    const width = spec.tank.width;
+    const depth = spec.tank.depth;
+    if (!chamberDivider) {
+      // 面 + 边框一起画。只画面不行 —— 隔板是水平的，而相机几乎与它等高，
+      // 正看过去投影面积接近零，等于隐形（第一版就是这么翻车的）。
+      // 边框在水平视角下正好是一条横贯水缸的线，才是玩家读得到的那个分隔。
+      const plane = new THREE.PlaneGeometry(1, 1);
+      chamberDivider = new THREE.Group();
+      const face = new THREE.Mesh(
+        plane,
+        new THREE.MeshBasicMaterial({
+          color: '#16211f',
+          transparent: true,
+          opacity: 0.1,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      );
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(plane),
+        new THREE.LineBasicMaterial({
+          color: '#16211f',
+          transparent: true,
+          opacity: 0.5,
+        })
+      );
+      chamberDivider.add(face, edges);
+      chamberDivider.rotation.x = -Math.PI / 2;
+      chamberDivider.renderOrder = 1;
+      scene.add(chamberDivider);
+    }
+    chamberDivider.scale.set(width, depth, 1);
+    chamberDivider.position.set(0, 0, 0);
+  }
 
   const DEFAULT_SCENE_BG = '#f4efe6';
   const TUTORIAL_SCENE_BG = '#eef1f0';
@@ -525,6 +578,7 @@ async function bootstrap() {
       scene.background.set(isTutorial ? TUTORIAL_SCENE_BG : DEFAULT_SCENE_BG);
     }
     applyDepthCue(isTutorial);
+    applyChamberDivider(isTutorial ? tutorialSpec : null);
     // T1 不教变速：SPACE 慢放留给 T2、ENTER 快进留给 T3，每个操作都在
     // 它第一次真正有用的那一刻才出现。现在挂在顶上只是噪音。
     timeShortcuts?.setEnabled(!isTutorial && (timeShortcutsAllowed ?? true));
@@ -536,6 +590,9 @@ async function bootstrap() {
         spec: tutorialSpec,
         // 跟随游客壳当前的语言：玩家在标题页选过中文，进教学关就该是中文。
         language: visitorUI?.language ?? 'en',
+        onPauseChange(chambers) {
+          simulation.setFrozenChambers(chambers);
+        },
         onLanguageChange(next) {
           // 反向同步，免得退出教学关后标题页又跳回英文。
           window.downstream?.setLang?.(next);
