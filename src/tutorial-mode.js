@@ -168,10 +168,24 @@ export const T2_SPEC = deepFreeze({
   //
   // 缸高提到 2.0（子缸 0.95），宽度同步提到 4.8 好维持 2.4 的比例 ——
   // 那个比例是给底部控制条带留空水用的（见 T1 的 tank 注释）。
-  tank: { width: 4.8, height: 2, depth: 1.6 },
-  // 两个子缸之间留 0.1m。隔间隔离之后这条缝纯粹是视觉分隔 ——
-  // 感知与捕食已经被关系矩阵切断，不再依赖间距（实测拉到 1m 也挡不住）。
-  chamberGap: 0.1,
+  // 宽度跟着高度走，维持 2.4 的比例 —— 那个比例是给底部控制条带留空水用的。
+  // 高度提到 2.4 后若维持 4.8 宽，比例变 2.0，下面那个缸会被条带切掉一截。
+  tank: { width: 5.8, height: 2.4, depth: 1.6 },
+  // 两个子缸之间的空气。隔离早由关系矩阵保证，这条缝【纯粹是给眼睛看的】。
+  //
+  // 第一版只留 0.1m（缸高的 5%），设计者的反馈是"看上去是一个缸莫名其妙
+  // 分成两个"—— 太窄的缝读起来是"切开"，不是"两个"。开到 0.5m 之后
+  // 两个盒子之间有真正的空气，才读得对。
+  // 总缸高同步提到 2.4，好让子缸维持 0.95 —— 那是验证过能让「逃」成立的
+  // 尺寸（0.70 时这一课是反的，见上面 tank 的注释）。
+  chamberGap: 0.5,
+  // 两个缸整体上移多少（世界单位）。
+  //
+  // 底部控制条带占掉画面下方约四成，而相机是对着原点自动取景的 —— 缸正好
+  // 骑在条带上，下面那个会被切掉一截。与其去动那套为 iPad 横屏写的取景
+  // 逻辑，不如把内容抬上来：这一个数同时作用于视觉盒子和鱼的活动范围，
+  // 两者不会脱节。调大 = 整体更靠上。
+  stageShiftY: 0.42,
   chambers: [
     { id: 'top', role: 'flee' },
     { id: 'bottom', role: 'chase' },
@@ -328,8 +342,9 @@ function buildChamberedConfig(spec, value) {
 
   const half = (spec.tank.height - spec.chamberGap) / 2;
   const offset = (spec.chamberGap + half) / 2;
+  const shift = spec.stageShiftY ?? 0;
   const boxFor = (chamber) => ({
-    centerY: chamber === 'top' ? offset : -offset,
+    centerY: (chamber === 'top' ? offset : -offset) + shift,
     height: half,
   });
   const spawnY = (chamber) => boxFor(chamber).centerY / spec.tank.height;

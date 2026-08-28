@@ -40,6 +40,7 @@ export function createScene(wrapper, getRotation = () => 0) {
   // grid is layered on top so orbiting still reads as a 3D aquarium rather
   // than a flat silhouette.
   let shell = null;
+  let shells = [];
 
   function buildFaceGridGeometry(width, height, depth, divisions) {
     const div = Math.max(1, Math.round(divisions));
@@ -94,24 +95,51 @@ export function createScene(wrapper, getRotation = () => 0) {
       1,
       Math.max(0, Number(TANK_VISUAL_PARAMS.gridOpacity) || 0)
     );
-    shell.grid.visible = enabled && opacity > 0;
-    shell.grid.material.opacity = opacity;
-    shell.grid.material.transparent = opacity < 1;
-    shell.grid.material.depthWrite = opacity >= 1;
-    shell.grid.material.needsUpdate = true;
+    for (const item of shells) {
+      item.grid.visible = enabled && opacity > 0;
+      item.grid.material.opacity = opacity;
+      item.grid.material.transparent = opacity < 1;
+      item.grid.material.depthWrite = opacity >= 1;
+      item.grid.material.needsUpdate = true;
+    }
+  }
+
+  // 分缸：教学关 T2 需要【两个看得出是两个】的缸。
+  //
+  // 仿真那边早就是隔离的（school.bounds 硬钳制 + school.chamber 把跨隔间
+  // 关系降为 ignore），所以这里只是视觉 —— 但只画一条隔板不行：那读起来
+  // 是"一个缸被莫名其妙分成两半"，不是"两个缸"。真正分开画两个盒子、
+  // 中间留空，才是玩家一眼能读对的东西。
+  // null = 整缸一个盒子（所有非教学场景的现有行为）。
+  let chamberBoxes = null;
+  function setTankChambers(chambers) {
+    const next = Array.isArray(chambers) && chambers.length ? chambers : null;
+    const same =
+      JSON.stringify(next ?? null) === JSON.stringify(chamberBoxes ?? null);
+    if (same) return;
+    chamberBoxes = next;
+    buildShell();
   }
 
   function buildShell() {
-    if (shell) {
-      scene.remove(shell.edges, shell.panes, shell.grid);
-      shell.box.dispose();
-      shell.edgesGeo.dispose();
-      shell.edges.material.dispose();
-      shell.panes.material.dispose();
-      shell.gridGeo.dispose();
-      shell.grid.material.dispose();
+    for (const item of shells) {
+      scene.remove(item.edges, item.panes, item.grid);
+      item.box.dispose();
+      item.edgesGeo.dispose();
+      item.edges.material.dispose();
+      item.panes.material.dispose();
+      item.gridGeo.dispose();
+      item.grid.material.dispose();
     }
-    const box = new THREE.BoxGeometry(TANK.width, TANK.height, TANK.depth);
+    shells = [];
+    const boxes = chamberBoxes ?? [{ centerY: 0, height: TANK.height }];
+    for (const spec of boxes) shells.push(buildOneShell(spec));
+    shell = shells[0];
+    syncTankGrid();
+  }
+
+  function buildOneShell({ centerY = 0, height = TANK.height } = {}) {
+    const box = new THREE.BoxGeometry(TANK.width, height, TANK.depth);
     const edgesGeo = new THREE.EdgesGeometry(box);
     const edges = new THREE.LineSegments(
       edgesGeo,
@@ -135,7 +163,7 @@ export function createScene(wrapper, getRotation = () => 0) {
     );
     const gridGeo = buildFaceGridGeometry(
       TANK.width,
-      TANK.height,
+      height,
       TANK.depth,
       TANK_VISUAL_PARAMS.gridDivisions
     );
@@ -148,9 +176,9 @@ export function createScene(wrapper, getRotation = () => 0) {
         depthWrite: false,
       })
     );
+    for (const node of [panes, edges, grid]) node.position.y = centerY;
     scene.add(panes, edges, grid);
-    shell = { box, edgesGeo, edges, panes, gridGeo, grid };
-    syncTankGrid();
+    return { box, edgesGeo, edges, panes, gridGeo, grid };
   }
   buildShell();
 
@@ -364,6 +392,7 @@ export function createScene(wrapper, getRotation = () => 0) {
   let lastGridDivisions = Math.round(TANK_VISUAL_PARAMS.gridDivisions);
 
   return {
+    setTankChambers,
     renderer,
     scene,
     camera,

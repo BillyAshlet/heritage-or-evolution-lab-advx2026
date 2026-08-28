@@ -322,56 +322,25 @@ async function bootstrap() {
   // 鱼的固有色被稀释，反而不容易比体型。0.3 保留纵深又让每条鱼都实。
   const DEPTH_CUE_MAX_FADE = 0.3;
 
-  // 分缸隔板。纯视觉 —— 隔离早就由 school.bounds（硬钳制）和
-  // school.chamber（跨隔间关系降为 ignore）保证了，这块板不参与任何判定。
-  // 但没有它，"两个缸"就只是一句设定：玩家看到的是一缸里混着三种鱼。
-  let chamberDivider = null;
+  // 分缸：教学关 T2 画成【两个真正的盒子】，不是一个盒子加一条隔板。
+  //
+  // 第一版就是加隔板 —— 设计者的反馈是"看上去是一个缸莫名其妙分成两个"，
+  // 这个判断准：隔板表达的是"切开"，而这一课要表达的是"两个独立环境"。
+  // 仿真那边早就是隔离的（bounds + chamber），所以这里纯粹是视觉，
+  // 但视觉才是玩家唯一能读到的东西。
   function applyChamberDivider(spec) {
-    const wanted = Boolean(spec?.chambers);
-    if (!wanted) {
-      if (chamberDivider) {
-        chamberDivider.removeFromParent();
-        chamberDivider.traverse((node) => {
-          node.geometry?.dispose();
-          node.material?.dispose();
-        });
-        chamberDivider = null;
-      }
+    if (!spec?.chambers) {
+      presentation.setTankChambers(null);
       return;
     }
-    const width = spec.tank.width;
-    const depth = spec.tank.depth;
-    if (!chamberDivider) {
-      // 面 + 边框一起画。只画面不行 —— 隔板是水平的，而相机几乎与它等高，
-      // 正看过去投影面积接近零，等于隐形（第一版就是这么翻车的）。
-      // 边框在水平视角下正好是一条横贯水缸的线，才是玩家读得到的那个分隔。
-      const plane = new THREE.PlaneGeometry(1, 1);
-      chamberDivider = new THREE.Group();
-      const face = new THREE.Mesh(
-        plane,
-        new THREE.MeshBasicMaterial({
-          color: '#16211f',
-          transparent: true,
-          opacity: 0.1,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        })
-      );
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(plane),
-        new THREE.LineBasicMaterial({
-          color: '#16211f',
-          transparent: true,
-          opacity: 0.5,
-        })
-      );
-      chamberDivider.add(face, edges);
-      chamberDivider.rotation.x = -Math.PI / 2;
-      chamberDivider.renderOrder = 1;
-      scene.add(chamberDivider);
-    }
-    chamberDivider.scale.set(width, depth, 1);
-    chamberDivider.position.set(0, 0, 0);
+    const half = (spec.tank.height - spec.chamberGap) / 2;
+    const offset = (spec.chamberGap + half) / 2;
+    // 必须和 tutorial-mode.js 的 boxFor 用同一个位移，否则盒子和鱼会错位。
+    const shift = spec.stageShiftY ?? 0;
+    presentation.setTankChambers([
+      { centerY: offset + shift, height: half },
+      { centerY: -offset + shift, height: half },
+    ]);
   }
 
   const DEFAULT_SCENE_BG = '#f4efe6';
