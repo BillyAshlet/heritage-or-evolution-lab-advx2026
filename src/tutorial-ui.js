@@ -28,6 +28,11 @@ import {
 
 const STYLE_ID = 'tutorial-ui-style';
 
+// 按键重复的节奏（毫秒）。自己驱动而不是用系统的，理由见 _onKey。
+const KEY_HOLD_DELAY_MS = 260;
+const KEY_REPEAT_MS = 40;
+const KEY_ACCEL_AFTER_MS = 700;
+
 /* 实验室白。中性色带一点青绿偏色 —— 纯灰会显得没被选过。 */
 const CSS = `
 #tutorial-ui {
@@ -500,7 +505,7 @@ export class TutorialUI {
         <p class="t-hint" id="t-hint"></p>
         <div class="t-rule-row">
           <span class="t-rule-label" id="t-rule-label"></span>
-          <span class="t-keys" aria-hidden="true"><kbd>A</kbd><kbd>D</kbd><kbd>⇧</kbd></span>
+          <span class="t-keys" aria-hidden="true"><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd></span>
           <div class="t-rule">
             ${
               gradient
@@ -561,22 +566,46 @@ export class TutorialUI {
       if (!button) return;
       this.togglePause(button.dataset.chamber);
     });
-    // A / D 调参：不用低头找滑块，眼睛可以一直盯着鱼 —— 这一课的意义
-    // 就是看现象。方向键留给原生 range（滑块获得焦点时它自己会处理），
-    // 所以这里只接 A/D，两边不会打架。
+    // A / D 或 ← / → 调参：不用低头找滑块，眼睛可以一直盯着鱼 ——
+    // 这一课的意义就是看现象，而调参时视线上下来回跑正好把要看的错过。
+    //
+    // 【自己驱动重复，不用系统的】。各操作系统的按键重复延迟（约
+    // 250–600ms）和频率（约 10–30/s）差很多，靠它会让同一个操作在不同
+    // 机器上手感不同。而且步进细到 0.01 之后，系统默认频率太慢 ——
+    // 跨过 T1 的整个区间要 145 下。
+    // 节奏：按下即走一格 → 停顿 → 每 40ms 一格 → 长按满 700ms 后间隔
+    // 减半到 20ms。所以点一下是精调，按住是快速扫过。
     this._onKey = (event) => {
       if (this.root.hidden) return;
       const node = event.target;
-      if (node && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA')) {
-        if (node !== slider) return;
+      if (
+        node &&
+        (node.tagName === 'TEXTAREA' ||
+          (node.tagName === 'INPUT' && node !== slider))
+      ) {
+        return;
       }
       const key = event.key.toLowerCase();
-      const direction = key === 'a' ? -1 : key === 'd' ? 1 : 0;
+      const direction =
+        key === 'a' || key === 'arrowleft'
+          ? -1
+          : key === 'd' || key === 'arrowright'
+            ? 1
+            : 0;
       if (!direction || event.metaKey || event.ctrlKey || event.altKey) return;
       event.preventDefault();
-      this.nudge(direction, event.shiftKey);
+      // 系统自带的重复直接丢掉 —— 节奏由下面的计时器统一负责。
+      if (event.repeat) return;
+      this._startRepeat(direction, event.shiftKey);
     };
+    this._onKeyUp = (event) => {
+      const key = event.key.toLowerCase();
+      if (['a', 'd', 'arrowleft', 'arrowright'].includes(key)) this._stopRepeat();
+    };
+    this._onBlur = () => this._stopRepeat();
     window.addEventListener('keydown', this._onKey);
+    window.addEventListener('keyup', this._onKeyUp);
+    window.addEventListener('blur', this._onBlur);
     root.querySelector('#t-fold').addEventListener('click', () => this.toggleFold());
     root.querySelector('#t-reset').addEventListener('click', () => this.callbacks.onReset?.());
     root.querySelector('#t-next').addEventListener('click', () => this.callbacks.onNext?.());
@@ -589,14 +618,33 @@ export class TutorialUI {
     this.render(this.value);
   }
 
+  _startRepeat(direction, coarse) {
+    this._stopRepeat();
+    this.nudge(direction, coarse);
+    const heldSince = performance.now();
+    const tick = () => {
+      this.nudge(direction, coarse);
+      const held = performance.now() - heldSince;
+      this._repeatTimer = setTimeout(
+        tick,
+        held > KEY_ACCEL_AFTER_MS ? KEY_REPEAT_MS / 2 : KEY_REPEAT_MS
+      );
+    };
+    this._repeatTimer = setTimeout(tick, KEY_HOLD_DELAY_MS);
+  }
+
+  _stopRepeat() {
+    clearTimeout(this._repeatTimer);
+    this._repeatTimer = 0;
+  }
+
   /**
-   * A/D 步进。用 keyStep 而不是 step —— 拖动要连续（step 0.01），
-   * 但按键若也是 0.01，跨过整个区间要按一百多下。
-   * 按住 Shift 退回最细粒度，用来精确停在阈值上。
+   * 走一格。默认用 step（和拖动同一个最细粒度），Shift 换成 keyStep
+   * 大步跳 —— 有了加速重复之后，细粒度才是该做默认的那个。
    */
-  nudge(direction, fine = false) {
+  nudge(direction, coarse = false) {
     const { min, max, step, keyStep } = this.spec.slider;
-    const amount = fine ? step : keyStep ?? step;
+    const amount = coarse ? keyStep ?? step : step;
     const next = Math.min(
       max,
       Math.max(min, Number((this.value + direction * amount).toFixed(4)))
@@ -740,7 +788,10 @@ export class TutorialUI {
   }
 
   dispose() {
+    this._stopRepeat();
     window.removeEventListener('keydown', this._onKey);
+    window.removeEventListener('keyup', this._onKeyUp);
+    window.removeEventListener('blur', this._onBlur);
     this.root.remove();
   }
 }
