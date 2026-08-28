@@ -44,21 +44,30 @@ const CSS = `
   --t-tick: #aab5b4;
   --t-amber: #c4892a;
 
-  /* 刻度用【单一色相的明度阶梯】，不用红绿。
+  /* 刻度用【冷 → 暖】，不用红绿。
    *
    * 红绿是"对/错"的配色，而这一课没有指标、没有输赢 —— 给"你吃它"
    * 涂绿色等于偷偷告诉玩家往右边走才对，把观察变成了优化，正好是这套
    * 设计要避免的事。（红绿也是最常见的色盲轴，约 8% 的男性读不出。）
    *
-   * 所以：颜色只编码【量】（体型/速度在变大），文字编码【意思】
-   * （它吃你 / 互不理睬 / 你吃它）。实验室仪器不会告诉你哪个读数是对的。 */
-  --t-step-1: #dfe4e3;
-  --t-step-2: #b9c2c0;
-  --t-step-3: #8e9a97;
-  --t-slow: #d3dad8;
-  --t-neutral: #a9b3b0;
-  --t-fast: #6f7d79;
-  --t-now: #a9b3b0;
+   * 但纯明度阶梯又太单调 —— 去掉立场的同时把信息通道砍到只剩一个。
+   * 冷暖是这个项目自己的语言（暖色的纸、冷色的水），而且冷暖【天然没有
+   * 立场】：没人觉得暖色是"对的"。方向也不是随手定的 —— 暖色前进、
+   * 冷色后退，所以暖 = 更大/更快是知觉上说得通的，不是约定。
+   *
+   * 色相刻意避开鱼群语义（橙 #e5a441 猎物、蓝 #4f9fcf 玩家、
+   * 红 #c95252 捕食者）：这里的青灰更绿更淡、赭色更暗更褐，
+   * 不会和"哪种鱼"混起来。
+   * 明度同时也在走（冷端亮 → 暖端暗），所以去色之后仍然读得出方向。
+   *
+   * 分工不变：颜色编码【量】，文字编码【意思】。 */
+  --t-step-1: #b7cfd2;
+  --t-step-2: #c2c0b4;
+  --t-step-3: #bd8f63;
+  --t-slow: #b7cfd2;
+  --t-neutral: #c2c0b4;
+  --t-fast: #bd8f63;
+  --t-now: #c2c0b4;
 
   position: fixed;
   left: 0;
@@ -400,7 +409,7 @@ function mixHex(from, to, ratio) {
 }
 
 // 与 CSS 里的 --t-slow / --t-neutral / --t-fast 对应，同一条明度阶梯。
-const SCALE_COLORS = { slow: '#d3dad8', neutral: '#a9b3b0', fast: '#6f7d79' };
+const SCALE_COLORS = { slow: '#b7cfd2', neutral: '#c2c0b4', fast: '#bd8f63' };
 
 function toPercent(spec, value) {
   const { min, max } = spec.slider;
