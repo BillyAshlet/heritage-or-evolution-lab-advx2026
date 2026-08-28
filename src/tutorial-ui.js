@@ -148,6 +148,18 @@ const CSS = `
   color: var(--t-dim);
   white-space: nowrap;
 }
+/* 按键提示。做成常驻的小徽章而不是一句说明 —— 说明会被读一次然后忘掉，
+   徽章一直在你要用它的地方。 */
+#tutorial-ui .t-keys { display: flex; gap: 3px; }
+#tutorial-ui .t-keys kbd {
+  font-family: inherit;
+  font-size: 0.62rem;
+  font-variation-settings: 'wght' 400;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border: 1px solid var(--t-line);
+  color: var(--t-dim);
+}
 #tutorial-ui .t-rule { position: relative; flex: 1; height: 46px; touch-action: none; }
 #tutorial-ui .t-bands {
   position: absolute; left: 0; right: 0; top: 15px; height: 10px;
@@ -488,6 +500,7 @@ export class TutorialUI {
         <p class="t-hint" id="t-hint"></p>
         <div class="t-rule-row">
           <span class="t-rule-label" id="t-rule-label"></span>
+          <span class="t-keys" aria-hidden="true"><kbd>A</kbd><kbd>D</kbd></span>
           <div class="t-rule">
             ${
               gradient
@@ -548,6 +561,22 @@ export class TutorialUI {
       if (!button) return;
       this.togglePause(button.dataset.chamber);
     });
+    // A / D 调参：不用低头找滑块，眼睛可以一直盯着鱼 —— 这一课的意义
+    // 就是看现象。方向键留给原生 range（滑块获得焦点时它自己会处理），
+    // 所以这里只接 A/D，两边不会打架。
+    this._onKey = (event) => {
+      if (this.root.hidden) return;
+      const node = event.target;
+      if (node && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA')) {
+        if (node !== slider) return;
+      }
+      const key = event.key.toLowerCase();
+      const direction = key === 'a' ? -1 : key === 'd' ? 1 : 0;
+      if (!direction || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      this.nudge(direction);
+    };
+    window.addEventListener('keydown', this._onKey);
     root.querySelector('#t-fold').addEventListener('click', () => this.toggleFold());
     root.querySelector('#t-reset').addEventListener('click', () => this.callbacks.onReset?.());
     root.querySelector('#t-next').addEventListener('click', () => this.callbacks.onNext?.());
@@ -558,6 +587,21 @@ export class TutorialUI {
   setLanguage(language) {
     this.language = language === 'zh' ? 'zh' : 'en';
     this.render(this.value);
+  }
+
+  /** 按一格步进。和拖动走同一条路径，所以行为完全一致。 */
+  nudge(direction) {
+    const { min, max, step } = this.spec.slider;
+    const next = Math.min(
+      max,
+      Math.max(min, Number((this.value + direction * step).toFixed(4)))
+    );
+    if (next === this.value) return;
+    this.value = next;
+    const slider = this.root.querySelector('#t-slider');
+    if (slider) slider.value = String(next);
+    this.render(next);
+    this.callbacks.onValueChange?.(next);
   }
 
   /** 从外部（点击缸体）切换暂停。UI 与仿真只有这一条同步路径。 */
@@ -691,6 +735,7 @@ export class TutorialUI {
   }
 
   dispose() {
+    window.removeEventListener('keydown', this._onKey);
     this.root.remove();
   }
 }
