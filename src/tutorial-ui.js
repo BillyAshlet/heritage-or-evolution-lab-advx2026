@@ -500,7 +500,7 @@ export class TutorialUI {
         <p class="t-hint" id="t-hint"></p>
         <div class="t-rule-row">
           <span class="t-rule-label" id="t-rule-label"></span>
-          <span class="t-keys" aria-hidden="true"><kbd>A</kbd><kbd>D</kbd></span>
+          <span class="t-keys" aria-hidden="true"><kbd>A</kbd><kbd>D</kbd><kbd>⇧</kbd></span>
           <div class="t-rule">
             ${
               gradient
@@ -574,7 +574,7 @@ export class TutorialUI {
       const direction = key === 'a' ? -1 : key === 'd' ? 1 : 0;
       if (!direction || event.metaKey || event.ctrlKey || event.altKey) return;
       event.preventDefault();
-      this.nudge(direction);
+      this.nudge(direction, event.shiftKey);
     };
     window.addEventListener('keydown', this._onKey);
     root.querySelector('#t-fold').addEventListener('click', () => this.toggleFold());
@@ -589,12 +589,17 @@ export class TutorialUI {
     this.render(this.value);
   }
 
-  /** 按一格步进。和拖动走同一条路径，所以行为完全一致。 */
-  nudge(direction) {
-    const { min, max, step } = this.spec.slider;
+  /**
+   * A/D 步进。用 keyStep 而不是 step —— 拖动要连续（step 0.01），
+   * 但按键若也是 0.01，跨过整个区间要按一百多下。
+   * 按住 Shift 退回最细粒度，用来精确停在阈值上。
+   */
+  nudge(direction, fine = false) {
+    const { min, max, step, keyStep } = this.spec.slider;
+    const amount = fine ? step : keyStep ?? step;
     const next = Math.min(
       max,
-      Math.max(min, Number((this.value + direction * step).toFixed(4)))
+      Math.max(min, Number((this.value + direction * amount).toFixed(4)))
     );
     if (next === this.value) return;
     this.value = next;
