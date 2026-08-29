@@ -17,6 +17,7 @@ import {
   createTutorialConfig,
   T1_SPEC,
   T2_SPEC,
+  T3_SPEC,
   tutorialRelation,
   RELATION_COPY,
   t,
@@ -109,4 +110,47 @@ const cleanOk = t2rows.every((row) => row.bad === 0);
 console.log(
   `  方向: 逃 ${topOk ? '✓' : '✗ 反了'} · 追 ${smallOk ? '✓' : '✗ 反了'}` +
     ` · 对照(大鱼/下缸我方不该死) ${cleanOk ? '✓' : '✗'}`
+);
+
+
+// ── T3 · 耐力 ────────────────────────────────────────────────────────
+// 判读标准：存活时长必须【随耐力单调递增】，且每一档最终都会死光 ——
+// 这一课教的是"能撑多久"，不是"能不能活"。早期版本用会再生的食物，
+// 结果所有档位都全员存活（食物从不稀缺），根本没有课可上。
+function runT3(value, seed, duration = 150) {
+  const config = createTutorialConfig(T3_SPEC, value);
+  config.runtime.randomizeSeed = false;
+  config.runtime.seed = seed;
+  const sim = new ExperimentSimulation({
+    scene: null,
+    config,
+    distanceField: null,
+    physics: null,
+  });
+  let wipe = null;
+  while (sim.elapsed < duration) {
+    sim._advance(DT);
+    if (sim.aliveCount(0) === 0) {
+      wipe = sim.elapsed;
+      break;
+    }
+  }
+  return wipe ?? duration;
+}
+
+console.log('\n第三课 · 耐力（3 种子 · 初始 12 条）');
+console.log('耐力    全群饿光耗时(秒)');
+const t3rows = [];
+for (const value of [0.55, 0.8, 1.0, 1.3, 1.6, 2.0]) {
+  const runs = SEEDS.slice(0, 3).map((seed) => runT3(value, seed));
+  const avg = mean(runs);
+  t3rows.push({ value, avg });
+  console.log(` ${value.toFixed(2)}          ${avg.toFixed(0)}`);
+}
+const monotone = t3rows.every(
+  (row, i) => i === 0 || row.avg > t3rows[i - 1].avg
+);
+const allDie = t3rows.every((row) => row.avg < 150);
+console.log(
+  `  单调递增 ${monotone ? '✓' : '✗'} · 每档都会死光 ${allDie ? '✓' : '✗'}`
 );

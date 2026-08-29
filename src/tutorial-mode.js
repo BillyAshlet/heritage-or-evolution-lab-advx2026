@@ -245,7 +245,66 @@ export const T2_SPEC = deepFreeze({
   ecology: false,
 });
 
-export const TUTORIAL_SPECS = Object.freeze([T1_SPEC, T2_SPEC]);
+/**
+ * 第三课 · 耐力。设计者原话：
+ *   「耐力时就是只有玩家和浮游生物/小型鱼。大了就可以存活很长时间，
+ *     小了就不行。」
+ *
+ * 这是三课里唯一【打开生态系统】的一课 —— T1/T2 都把 ecology 关掉了，
+ * 好让画面上只发生捕食这一件事。这里反过来：没有捕食者、没有猎物，
+ * 缸里只有你和食物，唯一会杀死你的是你自己的代谢。
+ *
+ * 而且它教的不是"电池能撑多久"，是【可持续性】：缸里有浮游生物在按
+ * logistic 再生，你摄食的速度是固定的，所以真正决定生死的是
+ * 代谢率跟不跟得上摄食率。耐力高 = 代谢慢 = 吃得回来；耐力低 = 烧得比
+ * 吃得快 = 迟早归零。这比倒计时深一层，而且是生态学里真实的那条线。
+ */
+export const T3_SPEC = deepFreeze({
+  id: 'T3',
+  axis: 'stamina',
+  label: { en: 'Lesson 03', zh: '第三课' },
+  axisName: { en: 'Stamina', zh: '耐力' },
+  brief: {
+    en: 'Only stamina can change. No predators here — the only thing that can kill you is your own metabolism. Watch how long the school lasts.',
+    zh: '只有耐力可以调。这里没有捕食者 —— 唯一能杀死你的是你自己的代谢。看这群鱼能撑多久。',
+  },
+  controlHint: {
+    en: 'Press ENTER to fast-forward — starvation takes longer to watch than a chase.',
+    zh: '按 ENTER 快进 —— 饿死比追逐慢得多，值得快进着看。',
+  },
+  tank: { width: 3.6, height: 1.5, depth: 1.6 },
+  playerCount: 12,
+  playerSize: 1.5,
+  playerName: { en: 'You', zh: '你的鱼' },
+  relations: { k: 1.25, KMax: 6 },
+  // 生态打开 —— 这一课的全部机制都在这里。
+  ecology: true,
+  // 食物做成【会被吃完的存粮】，不是会再生的牧场（growthRate: 0）。
+  //
+  // 一开始按默认的再生式做，结果是所有耐力档全员存活 120 秒 —— 因为
+  // grazeHungerRatio 0.8 让鱼只在能量低于 80% 时才进食，于是它们稳稳
+  // 钉在 80%，而再生远快于消耗，食物从来没有稀缺过。
+  // 调稀之后确实出现了阈值，但那是【二元】的：摄食≥代谢就永远活着，
+  // 否则归零 —— 而设计者要的是"大了活很久，小了不行"，那是【时长】判断。
+  // 存粮式食物才给得出时长梯度：所有鱼最终都会死，区别只在什么时候。
+  plankton: {
+    capacity: 3,
+    initialFraction: 1,
+    growthRate: 0,
+    minFraction: 0,
+    maxIntakePerFish: 0.02,
+    energyConversion: 1,
+  },
+  // 基础代谢翻倍（默认 0.02）。只为压缩时长，不改变任何比例关系 ——
+  // 0.02 时全灭要 38–131 秒，太长；0.04 是 20–68 秒，配 ENTER 快进
+  // 正好看得完，而耐力两端的差距仍是 3.4 倍。
+  ecology: { basalRate: 0.04 },
+  scaleStyle: 'gradient',
+  solo: true,
+  slider: { min: 0.55, max: 2, step: 0.01, keyStep: 0.05, initial: 0.8 },
+});
+
+export const TUTORIAL_SPECS = Object.freeze([T1_SPEC, T2_SPEC, T3_SPEC]);
 
 export function findTutorialSpec(id) {
   const found = TUTORIAL_SPECS.find((item) => item.id === id);
@@ -417,8 +476,38 @@ function buildChamberedConfig(spec, value) {
   return result;
 }
 
+function buildSoloConfig(spec, value) {
+  const result = createDefaultConfig();
+  Object.assign(result.runtime, {
+    project: TUTORIAL_PROJECT,
+    mode: 'steady',
+    populationPreset: 'custom',
+    timeScale: 1,
+  });
+  Object.assign(result.tank, { preset: 'game', ...spec.tank });
+  result.obstacles.enabled = false;
+  result.traits.enabled = false;
+  result.ecology.enabled = true;
+  Object.assign(result.ecology, spec.ecology, { enabled: true });
+  Object.assign(result.plankton, spec.plankton, { enabled: true });
+  Object.assign(result.relations, spec.relations);
+
+  // 只留玩家一个鱼群。这一课没有对手 —— 多留任何一群都会引入一条
+  // 没解释过的捕食关系，把"唯一能杀死你的是代谢"这个前提破坏掉。
+  const player = requireSchool(result, PLAYER_SCHOOL_ID);
+  Object.assign(player, {
+    name: t(spec.playerName, 'zh'),
+    count: spec.playerCount,
+    size: spec.playerSize,
+  });
+  result.schools = [player];
+
+  return applyAxisOnly(result, spec.axis, value);
+}
+
 export function createTutorialConfig(spec = T1_SPEC, value = spec.slider.initial) {
   if (spec.chambers) return buildChamberedConfig(spec, value);
+  if (spec.solo) return buildSoloConfig(spec, value);
   const result = createDefaultConfig();
 
   Object.assign(result.runtime, {
