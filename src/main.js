@@ -547,9 +547,16 @@ async function bootstrap() {
     }
     applyDepthCue(isTutorial);
     applyChamberDivider(isTutorial ? tutorialSpec : null);
-    // T1 不教变速：SPACE 慢放留给 T2、ENTER 快进留给 T3，每个操作都在
-    // 它第一次真正有用的那一刻才出现。现在挂在顶上只是噪音。
-    timeShortcuts?.setEnabled(!isTutorial && (timeShortcutsAllowed ?? true));
+    // 变速键按【本课是否声明】开放，不再一刀切关掉。
+    //
+    // 原来这里是 !isTutorial —— 三课全禁。但 T2 的提示写着"按住 SPACE
+    // 放慢"、T3 写着"按 ENTER 快进"，也就是界面在承诺一个我亲手禁用了的
+    // 功能。规范里"不能说谎"那一条，被我自己违反了。
+    // 每个操作仍然只在它第一次真正有用的那一课出现：T1 不给（那一课教
+    // 点鱼），T2 给慢放（追逐要看清），T3 给快进（饿死比追逐慢得多）。
+    const wantsTimeKeys = isTutorial ? Boolean(tutorialSpec?.timeControls) : true;
+    timeShortcuts?.setEnabled(wantsTimeKeys && (timeShortcutsAllowed ?? true));
+    app.dataset.timeKeys = wantsTimeKeys ? '1' : '';
     if (isTutorial && !tutorialUI) {
       // 首次进入教学关同样要退出预览态（换滑块走 installTutorialScene，
       // 但进关这一次不经过它）。

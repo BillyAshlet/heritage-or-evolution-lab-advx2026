@@ -178,6 +178,7 @@ export const T2_SPEC = deepFreeze({
     en: 'Hold SPACE to slow time down — chases are easier to read at half speed.',
     zh: '按住 SPACE 放慢时间 —— 追逐在半速下看得清楚得多。',
   },
+  timeControls: true,
   // 比 T1 大：这一课要演示【追与逃】，而追逃需要空间。
   //
   // 一开始沿用 T1 的 3.6×1.5，子缸只有 0.70m 高、而捕食半径 0.28m ——
@@ -304,6 +305,7 @@ export const T3_SPEC = deepFreeze({
     en: 'Press ENTER to fast-forward — starvation takes longer to watch than a chase.',
     zh: '按 ENTER 快进 —— 饿死比追逐慢得多，值得快进着看。',
   },
+  timeControls: true,
   tank: { width: 3.6, height: 1.5, depth: 1.6 },
   playerCount: 12,
   playerSize: 1.5,
@@ -326,10 +328,15 @@ export const T3_SPEC = deepFreeze({
     minFraction: 0,
     maxIntakePerFish: 0.02,
     energyConversion: 1,
-    // 默认 1200 颗点配这一缸的存粮像静态噪点，盖住了鱼。
-    // 稀到看得清单颗，"食物在被吃光"这件事才读得出来。
-    visualCount: 260,
-    pointSize: 0.045,
+    // 浮游的视觉是为【深水】调的：#14532d 深绿硬边方块，在暗背景里读作
+    // 有机质，放到实验室白底上就是一粒粒灰尘 —— 和之前那个"白色辉光在
+    // 白底上隐形"是同一类问题，特效的配色假设了深色背景。
+    // 改成悬浮颗粒的读法：更淡、更小、更多，读作"水里有东西"而不是
+    // "屏幕脏了"。数量多反而更好 —— 稀疏的大点是碎屑，密集的小点是悬浮物。
+    visualCount: 700,
+    pointSize: 0.026,
+    color: '#8aa886',
+    opacity: 0.5,
   },
   // 基础代谢翻倍（默认 0.02）。只为压缩时长，不改变任何比例关系 ——
   // 0.02 时全灭要 38–131 秒，太长；0.04 是 20–68 秒，配 ENTER 快进

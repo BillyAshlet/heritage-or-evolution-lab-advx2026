@@ -595,8 +595,11 @@
         outline-offset: 3px;
       }
 
-      /* 教学关不显示变速 HUD：SPACE/ENTER 是 T2/T3 的教学内容。 */
-      #app[data-project="tutorial"] #time-shortcut-hud { display: none !important; }
+      /* 教学关的变速 HUD 跟着本课是否开放变速走（main.js 写 data-time-keys）。
+         T1 不开（那一课教点鱼），T2 开慢放，T3 开快进。 */
+      #app[data-project="tutorial"]:not([data-time-keys="1"]) #time-shortcut-hud {
+        display: none !important;
+      }
 
       #app[data-ui-hidden="1"] #panel-holder,
       #app[data-ui-hidden="1"] #lab-mark,
