@@ -103,6 +103,21 @@ export const T1_SPEC = deepFreeze({
   // 0.05 一格等于把一条连续的量切成 20 格，玩家没法停在阈值附近看它翻转
   // （T1 的两个边界在 0.80 和 1.25，正好卡在格与格之间）。细到 0.01 拖动
   // 才连续；但 A/D 若也用 0.01，敲一下只动一点点，跨过整个区间要 145 下。
+  // 悬停读数由本课自己声明（UI 只负责渲染，见 tutorial-ui.js 的说明）。
+  readout: [
+    {
+      label: { en: 'You', zh: '你的体型' },
+      value: (spec, v) => (spec.referenceSize * tutorialSizeRatio(spec, v)).toFixed(2),
+    },
+    {
+      label: { en: 'Grey', zh: '灰鱼' },
+      value: (spec) => spec.referenceSize.toFixed(2),
+    },
+    {
+      label: { en: 'Ratio', zh: '体型比' },
+      value: (spec, v) => tutorialSizeRatio(spec, v).toFixed(2),
+    },
+  ],
   slider: { min: 0.55, max: 2, step: 0.01, keyStep: 0.05, initial: 1 },
   // 捕食参数放宽：正式关卡默认单体冷却 5.5 秒、捕食半径 0.09m，在 3.2m
   // 的迷你缸里要等十几秒才吃得到一口。教学关要的是「调完滑块几秒内就
@@ -239,8 +254,25 @@ export const T2_SPEC = deepFreeze({
   // 不对结果做任何预测。中点 = 与对手同速。
   // UI 之所以两课不同，是因为机制本身不同，不是没统一。
   scaleStyle: 'gradient',
+  gradientCopy: {
+    mid: { en: 'Same speed', zh: '与对手同速' },
+    above: { en: 'Faster', zh: '比对手快' },
+    below: { en: 'Slower', zh: '比对手慢' },
+    same: { en: 'Matched', zh: '同速' },
+  },
   // 初始值刻意放在【做不到】那一侧：T1 的中性档什么都不发生，被指出
   // "画面上没有在发生事情"。这一课一进来就该看到自己被追上、也追不上。
+  readout: [
+    { label: { en: 'You', zh: '你的鱼' }, value: (spec, v) => `×${v.toFixed(2)}` },
+    {
+      label: { en: 'Big fish', zh: '大鱼' },
+      value: (spec) => `×${spec.rivalSpeed.top.toFixed(2)}`,
+    },
+    {
+      label: { en: 'Small fish', zh: '小鱼' },
+      value: (spec) => `×${spec.rivalSpeed.bottom.toFixed(2)}`,
+    },
+  ],
   slider: { min: 0.6, max: 1.6, step: 0.01, keyStep: 0.05, initial: 0.85 },
   ecology: false,
 });
@@ -294,13 +326,33 @@ export const T3_SPEC = deepFreeze({
     minFraction: 0,
     maxIntakePerFish: 0.02,
     energyConversion: 1,
+    // 默认 1200 颗点配这一缸的存粮像静态噪点，盖住了鱼。
+    // 稀到看得清单颗，"食物在被吃光"这件事才读得出来。
+    visualCount: 260,
+    pointSize: 0.045,
   },
   // 基础代谢翻倍（默认 0.02）。只为压缩时长，不改变任何比例关系 ——
   // 0.02 时全灭要 38–131 秒，太长；0.04 是 20–68 秒，配 ENTER 快进
   // 正好看得完，而耐力两端的差距仍是 3.4 倍。
   ecology: { basalRate: 0.04 },
   scaleStyle: 'gradient',
+  // 这一课没有对手，所以中点不是"和谁一样"，是【基准代谢】本身。
+  gradientCopy: {
+    mid: { en: 'Baseline burn', zh: '基准代谢' },
+    above: { en: 'Tougher', zh: '更耐' },
+    below: { en: 'Frailer', zh: '更不耐' },
+    same: { en: 'Baseline', zh: '基准' },
+  },
   solo: true,
+  // 耐力的直接后果就是代谢的倒数 —— 把两个数并排摆出来，玩家不用心算
+  // 也能看出"耐力翻倍 = 烧得慢一半"。
+  readout: [
+    { label: { en: 'Stamina', zh: '耐力' }, value: (spec, v) => `×${v.toFixed(2)}` },
+    {
+      label: { en: 'Burn rate', zh: '代谢' },
+      value: (spec, v) => `×${(1 / v).toFixed(2)}`,
+    },
+  ],
   slider: { min: 0.55, max: 2, step: 0.01, keyStep: 0.05, initial: 0.8 },
 });
 

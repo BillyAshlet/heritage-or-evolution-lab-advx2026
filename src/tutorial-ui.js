@@ -532,11 +532,11 @@ export class TutorialUI {
             ${zoneMarkup}`
             }
             <div class="t-cursor" id="t-cursor"></div>
-            <div class="t-readout" id="t-readout">
-              <div class="t-cell"><b id="t-lbl-you"></b><u id="t-you">—</u></div>
-              <div class="t-cell"><b id="t-lbl-grey"></b><u id="t-grey">—</u></div>
-              <div class="t-cell"><b id="t-lbl-ratio"></b><u id="t-ratio">—</u></div>
-            </div>
+            <div class="t-readout" id="t-readout">${(spec.readout ?? [])
+              .map(
+                () => '<div class="t-cell"><b></b><u>—</u></div>'
+              )
+              .join('')}</div>
             <input type="range" id="t-slider"
                    min="${min}" max="${max}" step="${step}" value="${initial}" />
           </div>
@@ -703,13 +703,6 @@ export class TutorialUI {
     q('#t-brief').textContent = t(spec.brief, this.language);
     q('#t-hint').textContent = t(spec.controlHint, this.language);
     q('#t-rule-label').textContent = t(spec.axisName, this.language);
-    q('#t-lbl-you').textContent = this._text('you');
-    q('#t-lbl-grey').textContent = gradient
-      ? this._text('bigFish')
-      : this._text('grey');
-    q('#t-lbl-ratio').textContent = gradient
-      ? this._text('smallFish')
-      : this._text('ratio');
     q('#t-lbl-result').textContent = this._text('result');
     q('#t-reset').textContent = this._text('rerun');
     q('#t-next').textContent = this._text('understood');
@@ -755,7 +748,7 @@ export class TutorialUI {
         mixHex(SCALE_COLORS.neutral, target, lean)
       );
       const midLabel = q('#t-midlabel');
-      if (midLabel) midLabel.textContent = this._text('sameSpeed');
+      if (midLabel) midLabel.textContent = t(spec.gradientCopy.mid, this.language);
     } else {
       const activeIndex = this.bands.findIndex(
         (band) => band.relation === relation
@@ -772,26 +765,32 @@ export class TutorialUI {
     q('#t-cursor').style.left = `${percent}%`;
     // 读数卡贴着游标走，两端要收住，否则会被轨道边缘裁掉。
     q('#t-readout').style.left = `${Math.min(88, Math.max(12, percent))}%`;
-    if (gradient) {
-      // 读数直接给出「你 / 大鱼 / 小鱼」三者的速度倍率 —— 玩家在比什么，
-      // 就把什么摆出来，不用他心算。
-      q('#t-you').textContent = `×${value.toFixed(2)}`;
-      q('#t-grey').textContent = `×${spec.rivalSpeed.top.toFixed(2)}`;
-      q('#t-ratio').textContent = `×${spec.rivalSpeed.bottom.toFixed(2)}`;
-    } else {
-      q('#t-you').textContent = (spec.referenceSize * ratio).toFixed(2);
-      q('#t-grey').textContent = spec.referenceSize.toFixed(2);
-      q('#t-ratio').textContent = ratio.toFixed(2);
-    }
+    // 读数由 spec 自己声明，UI 只负责渲染。
+    //
+    // 原来这里是按课 if/else 取字段的，结果同一个 bug 坏了两次：加 T2 时
+    // 读到 T1 专用的 spec.referenceSize 崩了一次，加 T3 时又读到 T2 专用的
+    // spec.rivalSpeed 崩了第二次 —— 每加一课就多一条会漏的分支。
+    // 改成声明式之后，第四课再来也不可能因为少了某个字段而崩。
+    const cells = this.root.querySelectorAll('#t-readout .t-cell');
+    (spec.readout ?? []).forEach((entry, index) => {
+      const cell = cells[index];
+      if (!cell) return;
+      cell.querySelector('b').textContent = t(entry.label, this.language);
+      cell.querySelector('u').textContent = entry.value(spec, value);
+    });
     if (spec.scaleStyle === 'gradient') {
+      // 文案同样由本课声明 —— 写死"Faster/Slower"会让 T3 的耐力刻度
+      // 说出"比对手快 20%"这种和这一课无关的话（第一版就是这样）。
       const delta = Math.round((value - 1) * 100);
       q('#t-lbl-result').textContent = t(spec.axisName, this.language);
       q('#t-result').textContent =
         delta === 0
-          ? this._text('matched')
-          : `${this._text(delta > 0 ? 'faster' : 'slower')} ${Math.abs(delta)}%`;
-      q('#t-state').dataset.tone =
-        delta === 0 ? 'peer' : delta > 0 ? 'eat' : 'eaten';
+          ? t(spec.gradientCopy.same, this.language)
+          : `${t(
+              delta > 0 ? spec.gradientCopy.above : spec.gradientCopy.below,
+              this.language
+            )} ${Math.abs(delta)}%`;
+      q('#t-state').dataset.tone = 'peer';
     } else {
       q('#t-result').textContent = t(copy, this.language);
       q('#t-state').dataset.tone = copy.tone;
