@@ -386,6 +386,9 @@ const UI_COPY = {
   resumeBottom: { en: 'Resume bottom', zh: '继续下缸' },
   rerun: { en: 'Re-run', zh: '重新开始' },
   understood: { en: 'I understand', zh: '我明白了' },
+  // 最后一课的主按钮换词：这一下不是"再看一课"，是【离开安全试验】。
+  // 后面每个选择都会传给下一代，措辞该让人知道自己正在跨过去。
+  beginRun: { en: 'Begin the first generation', zh: '开始第一代' },
   skip: { en: 'Skip', zh: '跳过教学' },
   fold: { en: 'Fold', zh: '收起' },
   unfold: { en: 'Unfold', zh: '展开' },
@@ -426,12 +429,14 @@ export class TutorialUI {
     onNext,
     onExit,
     onLanguageChange,
+    lastLesson = false,
   } = {}) {
     ensureStyle();
     this.spec = spec;
     this.language = language === 'zh' ? 'zh' : 'en';
     this.callbacks = { onValueChange, onReset, onNext, onExit, onLanguageChange, onPauseChange };
     this.value = spec.slider.initial;
+    this.lastLesson = Boolean(lastLesson);
     this.folded = false;
     this.paused = new Set();
     this.bands = spec.scaleStyle === 'gradient' ? [] : this._bands();
@@ -705,7 +710,9 @@ export class TutorialUI {
     q('#t-rule-label').textContent = t(spec.axisName, this.language);
     q('#t-lbl-result').textContent = this._text('result');
     q('#t-reset').textContent = this._text('rerun');
-    q('#t-next').textContent = this._text('understood');
+    q('#t-next').textContent = this._text(
+      this.lastLesson ? 'beginRun' : 'understood'
+    );
     q('#t-exit').textContent = this._text('skip');
     q('#t-fold').textContent = this.folded ? this._text('unfold') : this._text('fold');
     this.root.querySelectorAll('#t-pause button').forEach((button) => {

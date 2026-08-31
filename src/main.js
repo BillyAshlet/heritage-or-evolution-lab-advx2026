@@ -379,7 +379,8 @@ async function bootstrap() {
       spec = T1_SPEC;
       console.warn(`未知的教学关 ${lesson}，已回落到 ${spec.id}。`);
     }
-    if (spec !== tutorialSpec) {
+    const changedLesson = spec !== tutorialSpec;
+    if (changedLesson) {
       tutorialSpec = spec;
       tutorialValue = spec.slider.initial;
       // 面板是按 spec 一次性建出来的，换课必须重建，否则文案会停在上一课。
@@ -388,7 +389,10 @@ async function bootstrap() {
     }
     visitorUI?.hide();
     if (current.runtime.project === TUTORIAL_PROJECT) {
-      syncProjectPresentation(true);
+      // 已经在教学关里换课：syncProjectPresentation 只会重建面板，
+      // 缸体和鱼群还停在上一课 —— 场景得自己装。
+      if (changedLesson) installTutorialScene();
+      else syncProjectPresentation(true);
     } else {
       switchProject(TUTORIAL_PROJECT);
     }
@@ -401,6 +405,28 @@ async function bootstrap() {
     stage.runtime.project = project;
     controller.applyConfig('rebuildScene', 'runtime.project');
     debug?.rebuildPane();
+  }
+
+  function nextTutorialSpec(spec) {
+    const index = TUTORIAL_SPECS.indexOf(spec);
+    return index >= 0 ? TUTORIAL_SPECS[index + 1] : undefined;
+  }
+
+  /**
+   * 「我明白了」→ 进下一课；三课都看完就离开教学、进入正式关卡。
+   *
+   * 走 pushState + applyTutorialRoute 而不是直接换 spec：这样浏览器的
+   * 后退键能一课课退回去，地址栏也始终是当前那一课 —— 路由是唯一的
+   * 真相来源，UI 只是照着它渲染。
+   */
+  function advanceTutorial() {
+    const next = nextTutorialSpec(tutorialSpec);
+    if (!next) {
+      leaveTutorial('game');
+      return;
+    }
+    history.pushState(null, '', `${ROUTE_BASE}tutorial/${next.id}`);
+    applyTutorialRoute();
   }
 
   // 退出教学时把地址退回根，否则刷新会被弹回教学关。用 pushState 而不是
@@ -563,6 +589,7 @@ async function bootstrap() {
       simulation.beginGameplayFromPreview();
       tutorialUI = new TutorialUI({
         spec: tutorialSpec,
+        lastLesson: !nextTutorialSpec(tutorialSpec),
         // 跟随游客壳当前的语言：玩家在标题页选过中文，进教学关就该是中文。
         language: visitorUI?.language ?? 'en',
         onPauseChange(chambers) {
@@ -578,10 +605,7 @@ async function bootstrap() {
         },
         onReset: installTutorialScene,
         onNext() {
-          // T2/T3 尚未实现。做完之前，「继续」先退回游戏本体，
-          // 不假装有下一课。
-          window.alert('第二课（速度）还没做，先回到正式关卡。');
-          leaveTutorial('game');
+          advanceTutorial();
         },
         onExit() {
           leaveTutorial('game');
